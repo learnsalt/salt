@@ -32,6 +32,8 @@ import salt.output
 import salt.syspaths
 import salt.utils.data
 import salt.utils.event
+import salt.utils.versions
+from salt.features import features
 
 log = logging.getLogger(__name__)
 
@@ -600,7 +602,7 @@ def function(
         func_ret["comment"] = "No minions responded"
     else:
         if changes:
-            func_ret["changes"] = {"out": "highstate", "ret": changes}
+            func_ret["changes"] = {"ret": changes}
         if fail:
             func_ret["result"] = False
             func_ret["comment"] = "Running function {} failed on minions: {}".format(
@@ -666,7 +668,7 @@ def wait_for_event(name, id_list, event_id="id", timeout=300, node="master"):
         return ret
 
     with salt.utils.event.get_event(
-        node, __opts__["sock_dir"], __opts__["transport"], opts=__opts__, listen=True
+        node, __opts__["sock_dir"], opts=__opts__, listen=True
     ) as sevent:
 
         del_counter = 0
@@ -689,26 +691,50 @@ def wait_for_event(name, id_list, event_id="id", timeout=300, node="master"):
                     val = event["data"]["data"].get(event_id)
 
                 if val is not None:
-                    try:
-                        val_idx = id_list.index(val)
-                    except ValueError:
-                        log.trace(
-                            "wait_for_event: Event identifier '%s' not in "
-                            "id_list; skipping.",
-                            event_id,
-                        )
-                    else:
-                        del id_list[val_idx]
-                        del_counter += 1
-                        minions_seen = ret["changes"].setdefault("minions_seen", [])
-                        minions_seen.append(val)
+                    if isinstance(val, list):
 
-                        log.debug(
-                            "wait_for_event: Event identifier '%s' removed "
-                            "from id_list; %s items remaining.",
-                            val,
-                            len(id_list),
-                        )
+                        val_list = [id for id in id_list if id in val]
+
+                        if not val_list:
+                            log.trace(
+                                "wait_for_event: Event identifier '%s' not in "
+                                "id_list; skipping",
+                                event_id,
+                            )
+                        elif val_list:
+                            minions_seen = ret["changes"].setdefault("minions_seen", [])
+                            for found_val in val_list:
+                                id_list.remove(found_val)
+                                del_counter += 1
+                                minions_seen.append(found_val)
+                                log.debug(
+                                    "wait_for_event: Event identifier '%s' removed "
+                                    "from id_list; %s items remaining.",
+                                    found_val,
+                                    len(id_list),
+                                )
+
+                    else:
+                        try:
+                            val_idx = id_list.index(val)
+                        except ValueError:
+                            log.trace(
+                                "wait_for_event: Event identifier '%s' not in "
+                                "id_list; skipping.",
+                                event_id,
+                            )
+                        else:
+                            del id_list[val_idx]
+                            del_counter += 1
+                            minions_seen = ret["changes"].setdefault("minions_seen", [])
+                            minions_seen.append(val)
+
+                            log.debug(
+                                "wait_for_event: Event identifier '%s' removed "
+                                "from id_list; %s items remaining.",
+                                val,
+                                len(id_list),
+                            )
                 else:
                     log.trace(
                         "wait_for_event: Event identifier '%s' not in event "
@@ -778,7 +804,14 @@ def runner(name, **kwargs):
         "executed" if success else "failed",
     )
 
-    ret["__orchestration__"] = True
+    if features.get("enable_deprecated_orchestration_flag", False):
+        ret["__orchestration__"] = True
+        salt.utils.versions.warn_until(
+            "Argon",
+            "The __orchestration__ return flag will be removed in Salt Argon. "
+            "For more information see https://github.com/saltstack/salt/pull/59917.",
+        )
+
     if "jid" in out:
         ret["__jid__"] = out["jid"]
 
@@ -1020,7 +1053,14 @@ def wheel(name, **kwargs):
         "executed" if success else "failed",
     )
 
-    ret["__orchestration__"] = True
+    if features.get("enable_deprecated_orchestration_flag", False):
+        ret["__orchestration__"] = True
+        salt.utils.versions.warn_until(
+            "Argon",
+            "The __orchestration__ return flag will be removed in Salt Argon. "
+            "For more information see https://github.com/saltstack/salt/pull/59917.",
+        )
+
     if "jid" in out:
         ret["__jid__"] = out["jid"]
 

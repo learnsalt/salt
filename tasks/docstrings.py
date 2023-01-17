@@ -4,12 +4,17 @@
 
     Docstrings related tasks
 """
+# pylint: disable=resource-leakage
 
 import ast
+import os
 import pathlib
 import re
+import sys
+from typing import TYPE_CHECKING
 
 from invoke import task  # pylint: disable=3rd-party-module-not-gated
+
 from salt.loader import SALT_INTERNAL_LOADERS_PATHS
 from salt.version import SaltStackVersion
 from tasks import utils
@@ -28,22 +33,12 @@ MISSING_DOCSTRINGS = {
     "salt/beacons/salt_monitor.py": ["validate", "beacon"],
     "salt/beacons/watchdog.py": ["close", "to_salt_event"],
     "salt/cache/localfs.py": ["get_storage_id", "init_kwargs"],
-    "salt/cache/redis_cache.py": ["init_kwargs"],
     "salt/cloud/clouds/clc.py": [
         "get_creds",
         "get_configured_provider",
         "get_queue_data",
     ],
     "salt/cloud/clouds/ec2.py": ["query", "sign"],
-    "salt/cloud/clouds/hetzner.py": [
-        "show_instance",
-        "avail_sizes",
-        "avail_images",
-        "avail_locations",
-        "list_ssh_keys",
-        "list_nodes",
-        "list_nodes_full",
-    ],
     "salt/cloud/clouds/libvirt.py": [
         "get_domain_ips",
         "destroy_domain",
@@ -87,15 +82,9 @@ MISSING_DOCSTRINGS = {
     "salt/grains/philips_hue.py": ["vendor", "kernel", "os", "os_family", "product"],
     "salt/grains/rest_sample.py": ["kernel", "os", "os_family", "location", "os_data"],
     "salt/grains/ssh_sample.py": ["location", "os_data", "kernel"],
-    "salt/log/handlers/fluent_mod.py": ["setup", "setup_handlers", "get_global_sender"],
-    "salt/log/handlers/log4mongo_mod.py": ["setup_handlers"],
-    "salt/log/handlers/logstash_mod.py": ["setup_handlers"],
-    "salt/metaproxy/proxy.py": [
-        "post_master_init",
-        "target",
-        "handle_payload",
-        "target_load",
-    ],
+    "salt/log_handlers/fluent_mod.py": ["setup", "setup_handlers", "get_global_sender"],
+    "salt/log_handlers/log4mongo_mod.py": ["setup_handlers"],
+    "salt/log_handlers/logstash_mod.py": ["setup_handlers"],
     "salt/modules/chassis.py": ["chassis_credentials", "cmd"],
     "salt/modules/csf.py": [
         "disable_testing_mode",
@@ -769,57 +758,17 @@ MISSING_EXAMPLES = {
     ],
     "salt/modules/virtualenv_mod.py": ["virtualenv_ver"],
     "salt/modules/vsphere.py": [
-        "create_storage_policy",
-        "power_off_vm",
-        "list_diskgroups",
-        "list_default_vsan_policy",
-        "create_diskgroup",
-        "list_dvportgroups",
-        "assign_license",
         "update_vm",
-        "list_cluster",
-        "update_dvportgroup",
-        "update_cluster",
-        "list_dvss",
         "set_advanced_configs",
-        "add_license",
-        "list_capability_definitions",
         "register_vm",
-        "list_disk_partitions",
-        "remove_datastore",
-        "update_storage_policy",
-        "erase_disk_partitions",
         "get_vm_config",
-        "remove_dvportgroup",
-        "delete_vm",
-        "create_datacenter",
-        "add_capacity_to_diskgroup",
         "get_vm_config_file",
-        "list_datacenters_via_proxy",
-        "power_on_vm",
-        "rename_datastore",
         "list_licenses",
-        "configure_host_cache",
         "compare_vm_configs",
-        "get_host_cache",
-        "unregister_vm",
-        "create_cluster",
-        "update_dvs",
-        "list_uplink_dvportgroup",
         "get_advanced_configs",
         "delete_advanced_configs",
-        "create_dvportgroup",
-        "list_disks",
-        "assign_default_storage_policy_to_datastore",
-        "create_dvs",
-        "list_datastores_via_proxy",
-        "list_default_storage_policy_of_datastore",
         "create_vmfs_datastore",
-        "list_assigned_licenses",
         "get_vm",
-        "remove_diskgroup",
-        "remove_capacity_from_diskgroup",
-        "list_storage_policies",
     ],
     "salt/modules/win_pkg.py": ["get_package_info"],
     "salt/modules/win_timezone.py": ["zone_compare"],
@@ -836,6 +785,72 @@ MISSING_EXAMPLES = {
         "lock_holders",
     ],
 }
+
+SUMMARY = """\
+### Hi! I'm your friendly PR bot!
+
+You might be wondering what I'm doing commenting here on your PR.
+
+**Yes, as a matter of fact, I am...**
+
+I'm just here to help us improve the documentation. I can't respond to
+questions or anything, but what I *can* do, I do well!
+
+**Okay... so what do you do?**
+
+I detect modules that are missing docstrings or "CLI Example" on existing docstrings!
+When I was created we had a *lot* of these. The documentation for these
+modules need some love and attention to make Salt better for our users.
+
+**So what does that have to do with my PR?**
+
+I noticed that in this PR there are some files changed that have some of these
+issues. So I'm leaving this comment to let you know your options.
+
+**Okay, what are they?**
+
+Well, my favorite, is that since you were making changes here I'm hoping that
+you would be the most familiar with this module and be able to add some other
+examples or fix any of the reported issues.
+
+**If I can, then what?**
+
+Well, you can either add them to this PR or add them to another PR. Either way is fine!
+
+**Well... what if I can't, or don't want to?**
+
+That's also fine! We appreciate *all* contributions to the Salt Project. If you
+can't add those other examples, either because you're too busy, or unfamiliar,
+or you just aren't interested, we still appreciate the contributions that
+you've made already.
+
+Whatever approach you decide to take, just drop a comment in the PR letting us know!
+"""
+
+
+def annotate(kind: str, fpath: str, start_lineno: int, end_lineno: int, message: str):
+    if kind not in ("warning", "error"):
+        raise RuntimeError("The annotation kind can only be one of 'warning', 'error'.")
+    if os.environ.get("GH_ACTIONS_ANNOTATE") is None:
+        return
+
+    github_output = os.environ.get("GITHUB_OUTPUT")
+    if github_output is None:
+        utils.warn("The 'GITHUB_OUTPUT' variable is not set. Not adding annotations.")
+        return
+
+    if TYPE_CHECKING:
+        assert github_output is not None
+
+    message = (
+        message.rstrip().replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    )
+    # Print it to stdout so that the GitHub runner pick's it up and adds the annotation
+    print(
+        f"::{kind} file={fpath},line={start_lineno},endLine={end_lineno}::{message}",
+        file=sys.stdout,
+        flush=True,
+    )
 
 
 @task(iterable=["files"], positional=["files"])
@@ -894,6 +909,13 @@ def check(ctx, files, check_proper_formatting=False, error_on_known_failures=Fal
                             path.relative_to(CODE_DIR),
                             *error,
                         )
+                        annotate(
+                            "error",
+                            path.relative_to(CODE_DIR),
+                            funcdef.lineno,
+                            funcdef.body[0].lineno,
+                            "Version {1:r!} is not valid for {0!r}".format(*error),
+                        )
 
                 if not str(path).startswith(SALT_INTERNAL_LOADERS_PATHS):
                     # No further docstrings checks are needed
@@ -918,6 +940,13 @@ def check(ctx, files, check_proper_formatting=False, error_on_known_failures=Fal
                             funcname,
                             relpath,
                         )
+                        annotate(
+                            "warning",
+                            path.relative_to(CODE_DIR),
+                            funcdef.lineno,
+                            funcdef.body[0].lineno,
+                            "Missing docstring",
+                        )
                         continue
                     errors += 1
                     exitcode = 1
@@ -925,6 +954,13 @@ def check(ctx, files, check_proper_formatting=False, error_on_known_failures=Fal
                         "The function '{}' on '{}' does not have a docstring",
                         funcname,
                         relpath,
+                    )
+                    annotate(
+                        "error",
+                        path.relative_to(CODE_DIR),
+                        funcdef.lineno,
+                        funcdef.body[0].lineno,
+                        "Missing docstring",
                     )
                     continue
                 elif funcname in MISSING_DOCSTRINGS.get(relpath, ()):
@@ -958,17 +994,31 @@ def check(ctx, files, check_proper_formatting=False, error_on_known_failures=Fal
                     ):
                         warnings += 1
                         utils.warn(
-                            "The function '{}' on '{}' does not have a 'CLI Example:' in it's docstring",
+                            "The function '{}' on '{}' does not have a 'CLI Example:' in its docstring",
                             funcname,
                             relpath,
+                        )
+                        annotate(
+                            "warning",
+                            path.relative_to(CODE_DIR),
+                            funcdef.lineno,
+                            funcdef.body[0].lineno,
+                            "Missing 'CLI Example:' in docstring",
                         )
                         continue
                     errors += 1
                     exitcode = 1
                     utils.error(
-                        "The function '{}' on '{}' does not have a 'CLI Example:' in it's docstring",
+                        "The function '{}' on '{}' does not have a 'CLI Example:' in its docstring",
                         funcname,
                         relpath,
+                    )
+                    annotate(
+                        "error",
+                        path.relative_to(CODE_DIR),
+                        funcdef.lineno,
+                        funcdef.body[0].lineno,
+                        "Missing 'CLI Example:' in docstring",
                     )
                     continue
                 elif funcname in MISSING_EXAMPLES.get(relpath, ()):
@@ -994,7 +1044,7 @@ def check(ctx, files, check_proper_formatting=False, error_on_known_failures=Fal
                     exitcode = 1
                     utils.error(
                         "The function {!r} on '{}' does not have a proper 'CLI Example:' section in "
-                        "it's docstring. The proper format is:\n"
+                        "its docstring. The proper format is:\n"
                         "CLI Example:\n"
                         "\n"
                         ".. code-block:: bash\n"
@@ -1002,6 +1052,19 @@ def check(ctx, files, check_proper_formatting=False, error_on_known_failures=Fal
                         "    salt '*' <insert example here>\n",
                         funcdef.name,
                         path.relative_to(CODE_DIR),
+                    )
+                    annotate(
+                        "warning",
+                        path.relative_to(CODE_DIR),
+                        funcdef.lineno,
+                        funcdef.body[0].lineno,
+                        "Wrong format in 'CLI Example:' in docstring.\n"
+                        "The proper format is:\n```"
+                        "CLI Example:\n"
+                        "\n"
+                        ".. code-block:: bash\n"
+                        "\n"
+                        "    salt '*' <insert example here>\n```",
                     )
                     continue
         finally:
@@ -1012,6 +1075,11 @@ def check(ctx, files, check_proper_formatting=False, error_on_known_failures=Fal
         utils.warn("Found {} warnings", warnings)
     if exitcode:
         utils.error("Found {} errors", errors)
+    if os.environ.get("GH_ACTIONS_ANNOTATE") and (warnings or errors):
+        github_step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
+        if github_step_summary:
+            with open(github_step_summary, "w", encoding="utf-8") as wfh:
+                wfh.write(SUMMARY)
     utils.exit_invoke(exitcode)
 
 

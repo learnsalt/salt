@@ -1,6 +1,8 @@
 import logging
 import os
 
+import pytest
+
 import salt.modules.cmdmod as cmdmod
 import salt.modules.pkg_resource as pkg_resource
 import salt.modules.rpm_lowpkg as rpm
@@ -9,12 +11,27 @@ import salt.utils.platform
 from salt.exceptions import CommandExecutionError, SaltInvocationError
 from tests.support.mock import MagicMock, Mock, call, patch
 
-try:
-    import pytest
-except ImportError:
-    pytest = None
-
 log = logging.getLogger(__name__)
+
+
+@pytest.fixture
+def configure_loader_modules():
+    def _add_data(data, key, value):
+        data.setdefault(key, []).append(value)
+
+    return {
+        yumpkg: {
+            "__context__": {"yum_bin": "yum"},
+            "__grains__": {
+                "osarch": "x86_64",
+                "os": "CentOS",
+                "os_family": "RedHat",
+                "osmajorrelease": 7,
+            },
+            "__salt__": {"pkg_resource.add_pkg": _add_data},
+        },
+        pkg_resource: {},
+    }
 
 
 @pytest.fixture(scope="module")
@@ -54,21 +71,26 @@ def list_repos_var():
     }
 
 
-@pytest.fixture
-def configure_loader_modules():
-
-    return {
-        yumpkg: {
-            "__context__": {"yum_bin": "yum"},
-            "__grains__": {
-                "osarch": "x86_64",
-                "os": "CentOS",
-                "os_family": "RedHat",
-                "osmajorrelease": 7,
-            },
+@pytest.fixture(
+    ids=["yum", "dnf"],
+    params=[
+        {
+            "context": {"yum_bin": "yum"},
+            "grains": {"os": "CentOS", "osrelease": 7},
+            "cmd": ["yum", "-y"],
         },
-        pkg_resource: {},
-    }
+        {
+            "context": {"yum_bin": "dnf"},
+            "grains": {"os": "Fedora", "osrelease": 27},
+            "cmd": ["dnf", "-y", "--best", "--allowerasing"],
+        },
+    ],
+)
+def yum_and_dnf(request):
+    with patch.dict(yumpkg.__context__, request.param["context"]), patch.dict(
+        yumpkg.__grains__, request.param["grains"]
+    ), patch.dict(pkg_resource.__grains__, request.param["grains"]):
+        yield request.param["cmd"]
 
 
 def test_list_pkgs():
@@ -1231,6 +1253,43 @@ def test_install_error_reporting():
         assert exc_info.value.info == expected, exc_info.value.info
 
 
+def test_remove_not_installed():
+    """
+    Tests that no exception raised on removing not installed package
+    """
+    name = "foo"
+    list_pkgs_mock = MagicMock(return_value={})
+    cmd_mock = MagicMock(
+        return_value={"pid": 12345, "retcode": 0, "stdout": "", "stderr": ""}
+    )
+    salt_mock = {
+        "cmd.run_all": cmd_mock,
+        "lowpkg.version_cmp": rpm.version_cmp,
+        "pkg_resource.parse_targets": MagicMock(
+            return_value=({name: None}, "repository")
+        ),
+    }
+    with patch.object(yumpkg, "list_pkgs", list_pkgs_mock), patch(
+        "salt.utils.systemd.has_scope", MagicMock(return_value=False)
+    ), patch.dict(yumpkg.__salt__, salt_mock):
+
+        # Test yum
+        with patch.dict(yumpkg.__context__, {"yum_bin": "yum"}), patch.dict(
+            yumpkg.__grains__, {"os": "CentOS", "osrelease": 7}
+        ):
+            yumpkg.remove(name)
+            cmd_mock.assert_not_called()
+
+        # Test dnf
+        yumpkg.__context__.pop("yum_bin")
+        cmd_mock.reset_mock()
+        with patch.dict(yumpkg.__context__, {"yum_bin": "dnf"}), patch.dict(
+            yumpkg.__grains__, {"os": "Fedora", "osrelease": 27}
+        ):
+            yumpkg.remove(name)
+            cmd_mock.assert_not_called()
+
+
 def test_upgrade_with_options():
     with patch.object(yumpkg, "list_pkgs", MagicMock(return_value={})), patch(
         "salt.utils.systemd.has_scope", MagicMock(return_value=False)
@@ -1910,24 +1969,25 @@ def test_call_yum_default():
             )
 
 
-@patch("salt.utils.systemd.has_scope", MagicMock(return_value=True))
 def test_call_yum_in_scope():
     """
     Call Yum/Dnf within the scope.
     :return:
     """
-    with patch.dict(yumpkg.__context__, {"yum_bin": "fake-yum"}):
-        with patch.dict(
-            yumpkg.__salt__,
-            {"cmd.run_all": MagicMock(), "config.get": MagicMock(return_value=True)},
-        ):
-            yumpkg._call_yum(["-y", "--do-something"])  # pylint: disable=W0106
-            yumpkg.__salt__["cmd.run_all"].assert_called_once_with(
-                ["systemd-run", "--scope", "fake-yum", "-y", "--do-something"],
-                env={},
-                output_loglevel="trace",
-                python_shell=False,
-            )
+    with patch(
+        "salt.utils.systemd.has_scope", MagicMock(return_value=True)
+    ), patch.dict(yumpkg.__context__, {"yum_bin": "fake-yum"}), patch.dict(
+        yumpkg.__salt__,
+        {"cmd.run_all": MagicMock(), "config.get": MagicMock(return_value=True)},
+    ):
+
+        yumpkg._call_yum(["-y", "--do-something"])  # pylint: disable=W0106
+        yumpkg.__salt__["cmd.run_all"].assert_called_once_with(
+            ["systemd-run", "--scope", "fake-yum", "-y", "--do-something"],
+            env={},
+            output_loglevel="trace",
+            python_shell=False,
+        )
 
 
 def test_call_yum_with_kwargs():
@@ -2011,3 +2071,40 @@ def test_61003_pkg_should_not_fail_when_target_not_in_old_pkgs():
         # packages that were returned by parse_targets that yumpkg.remove would
         # catch on fire.  This ensures that won't go undetected again.
         yumpkg.remove()
+
+
+@pytest.mark.parametrize(
+    "new,full_pkg_string",
+    (
+        (42, "fnord-42"),
+        (12, "fnord-12"),
+        ("42:1.2.3", "fnord-1.2.3"),
+    ),
+)
+def test_59705_version_as_accidental_float_should_become_text(
+    new, full_pkg_string, yum_and_dnf
+):
+    name = "fnord"
+    expected_cmd = yum_and_dnf + ["install", full_pkg_string]
+    cmd_mock = MagicMock(
+        return_value={"pid": 12345, "retcode": 0, "stdout": "", "stderr": ""}
+    )
+
+    def fake_parse(*args, **kwargs):
+        return {name: kwargs["version"]}, "repository"
+
+    patch_yum_salt = patch.dict(
+        yumpkg.__salt__,
+        {
+            "cmd.run": MagicMock(return_value=""),
+            "cmd.run_all": cmd_mock,
+            "lowpkg.version_cmp": rpm.version_cmp,
+            "pkg_resource.parse_targets": fake_parse,
+            "pkg_resource.format_pkg_list": pkg_resource.format_pkg_list,
+        },
+    )
+    patch_systemd = patch("salt.utils.systemd.has_scope", MagicMock(return_value=False))
+    with patch_systemd, patch_yum_salt:
+        yumpkg.install("fnord", version=new)
+        call = cmd_mock.mock_calls[0][1][0]
+        assert call == expected_cmd

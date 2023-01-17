@@ -1,20 +1,15 @@
 import pathlib
-import sys
 
 import attr
 import pytest
-import salt.transport.client
+
 import salt.transport.ipc
-import salt.transport.server
 import salt.utils.platform
 from salt.ext.tornado import locks
 
 pytestmark = [
     # Windows does not support POSIX IPC
     pytest.mark.skip_on_windows,
-    pytest.mark.skipif(
-        sys.version_info < (3, 6), reason="The IOLoop blocks under Py3.5 on these tests"
-    ),
 ]
 
 
@@ -123,7 +118,7 @@ async def test_send_many(channel):
 
 
 async def test_very_big_message(channel):
-    long_str = "".join([str(num) for num in range(10 ** 5)])
+    long_str = "".join([str(num) for num in range(10**5)])
     msg = {"long_str": long_str, "stop": True}
     await channel.send(msg)
     assert channel.payloads[0] == msg

@@ -65,7 +65,7 @@ from salt.exceptions import (
     SaltInvocationError,
     SaltRenderError,
 )
-from salt.utils.versions import LooseVersion
+from salt.utils.versions import Version
 
 log = logging.getLogger(__name__)
 
@@ -543,13 +543,34 @@ def _get_reg_software(include_components=True, include_updates=True):
 
     def skip_uninstall_string(hive, key, sub_key, use_32bit_registry):
         """
-        'UninstallString' must be present, because it stores the command line
+        `UninstallString` must be present, because it stores the command line
         that gets executed by Add/Remove programs, when the user tries to
-        uninstall a program.
+        uninstall a program. Skip those, unless `NoRemove` contains a non-zero
+        value in which case there is no `UninstallString` value.
+
+        We want to display these in case we're trying to install software that
+        will set the `NoRemove` option.
 
         Returns:
             bool: True if the package needs to be skipped, otherwise False
         """
+        # https://docs.microsoft.com/en-us/windows/win32/msi/arpnoremove
+        if __utils__["reg.value_exists"](
+            hive=hive,
+            key="{}\\{}".format(key, sub_key),
+            vname="NoRemove",
+            use_32bit_registry=use_32bit_registry,
+        ):
+            if (
+                __utils__["reg.read_value"](
+                    hive=hive,
+                    key="{}\\{}".format(key, sub_key),
+                    vname="NoRemove",
+                    use_32bit_registry=use_32bit_registry,
+                )["vdata"]
+                > 0
+            ):
+                return False
         if not __utils__["reg.value_exists"](
             hive=hive,
             key="{}\\{}".format(key, sub_key),
@@ -1316,7 +1337,7 @@ def _get_source_sum(source_hash, file_path, saltenv):
             )
             raise SaltInvocationError(invalid_hash_msg)
 
-        ret["hash_type"], ret["hsum"] = [item.strip().lower() for item in items]
+        ret["hash_type"], ret["hsum"] = (item.strip().lower() for item in items)
 
     return ret
 
@@ -1747,6 +1768,8 @@ def install(name=None, refresh=False, pkgs=None, **kwargs):
 
         # Install the software
         # Check Use Scheduler Option
+        log.debug("PKG : cmd: %s /s /c %s", cmd_shell, arguments)
+        log.debug("PKG : pwd: %s", cache_path)
         if pkginfo[version_num].get("use_scheduler", False):
             # Create Scheduled Task
             __salt__["task.create_task"](
@@ -1813,6 +1836,7 @@ def install(name=None, refresh=False, pkgs=None, **kwargs):
                 python_shell=False,
                 redirect_stderr=True,
             )
+            log.debug("PKG : retcode: %s", result["retcode"])
             if not result["retcode"]:
                 ret[pkg_name] = {"install status": "success"}
                 changed.append(pkg_name)
@@ -2332,7 +2356,7 @@ def _reverse_cmp_pkg_versions(pkg1, pkg2):
     """
     Compare software package versions
     """
-    return 1 if LooseVersion(pkg1) > LooseVersion(pkg2) else -1
+    return 1 if Version(pkg1) > Version(pkg2) else -1
 
 
 def _get_latest_pkg_version(pkginfo):
