@@ -41,6 +41,7 @@ Current known limitations
   - struct
   - salt.utils.win_reg
 """
+
 import csv
 import ctypes
 import glob
@@ -1825,6 +1826,18 @@ class _policy_info:
                             "Section": "System Access",
                         },
                         "Transform": self.enabled_one_disabled_zero_no_not_defined_transform,
+                    },
+                    "RelaxMinimumPasswordLengthLimits": {
+                        "Policy": "Relax minimum password length limits",
+                        "lgpo_section": self.password_policy_gpedit_path,
+                        "Settings": self.enabled_one_disabled_zero.keys(),
+                        "Registry": {
+                            "Hive": "HKEY_LOCAL_MACHINE",
+                            "Path": "SYSTEM\\CurrentControlSet\\Control\\SAM",
+                            "Value": "RelaxMinimumPasswordLengthLimits",
+                            "Type": "REG_DWORD",
+                        },
+                        "Transform": self.enabled_one_disabled_zero_transform,
                     },
                     "AdminAccountStatus": {
                         "Policy": "Accounts: Administrator account status",
@@ -4638,7 +4651,7 @@ class _policy_info:
         """
         add quotes around the string
         """
-        return '"{}"'.format(val)
+        return f'"{val}"'
 
     @classmethod
     def _binary_enable_zero_disable_one_conversion(cls, val, **kwargs):
@@ -4652,7 +4665,7 @@ class _policy_info:
                 elif ord(val) == 1:
                     return "Enabled"
                 else:
-                    return "Invalid Value: {!r}".format(val)
+                    return f"Invalid Value: {val!r}"
             else:
                 return "Not Defined"
         except TypeError:
@@ -4787,16 +4800,14 @@ class _policy_info:
         """
         converts a list of pysid objects to string representations
         """
-        if isinstance(val, str):
-            val = val.split(",")
         usernames = []
         for _sid in val:
             try:
                 userSid = win32security.LookupAccountSid("", _sid)
                 if userSid[1]:
-                    userSid = "{1}\\{0}".format(userSid[0], userSid[1])
+                    userSid = f"{userSid[1]}\\{userSid[0]}"
                 else:
-                    userSid = "{}".format(userSid[0])
+                    userSid = f"{userSid[0]}"
             # TODO: This needs to be more specific
             except Exception:  # pylint: disable=broad-except
                 userSid = win32security.ConvertSidToStringSid(_sid)
@@ -4906,11 +4917,11 @@ class _policy_info:
             return None
         if value_lookup:
             if not isinstance(item, list):
-                return "Invalid Value"
+                return "Invalid Value: Not a list"
             ret_val = 0
         else:
             if not isinstance(item, int):
-                return "Invalid Value"
+                return "Invalid Value: Not an int"
             ret_val = []
         if "lookup" in kwargs:
             for k, v in kwargs["lookup"].items():
@@ -4925,7 +4936,7 @@ class _policy_info:
                     if do_test and isinstance(k, int) and item & k == k:
                         ret_val.append(v)
         else:
-            return "Invalid Value"
+            return "Invalid Value: No lookup passed"
         return ret_val
 
     @classmethod
@@ -4988,7 +4999,7 @@ def _updateNamespace(item, new_namespace):
         temp_item = item.tag[i + 1 :]
     else:
         temp_item = item.tag
-    item.tag = "{{{0}}}{1}".format(new_namespace, temp_item)
+    item.tag = f"{{{new_namespace}}}{temp_item}"
     for child in item.getiterator():
         if isinstance(child.tag, str):
             temp_item = ""
@@ -4997,7 +5008,7 @@ def _updateNamespace(item, new_namespace):
                 temp_item = child.tag[i + 1 :]
             else:
                 temp_item = child.tag
-            child.tag = "{{{0}}}{1}".format(new_namespace, temp_item)
+            child.tag = f"{{{new_namespace}}}{temp_item}"
     return item
 
 
@@ -5065,10 +5076,10 @@ def _parse_xml(adm_file):
 
     modified_xml = ""
     with salt.utils.files.fopen(adm_file, "rb") as rfh:
-        file_hash = "{:X}".format(zlib.crc32(rfh.read()) & 0xFFFFFFFF)
+        file_hash = f"{zlib.crc32(rfh.read()) & 0xFFFFFFFF:X}"
 
     name, ext = os.path.splitext(os.path.basename(adm_file))
-    hashed_filename = "{}-{}{}".format(name, file_hash, ext)
+    hashed_filename = f"{name}-{file_hash}{ext}"
 
     cache_dir = os.path.join(__opts__["cachedir"], "lgpo", "policy_defs")
     if not os.path.exists(cache_dir):
@@ -5080,7 +5091,7 @@ def _parse_xml(adm_file):
         log.debug("LGPO: Generating policy template cache for %s%s", name, ext)
 
         # Remove old files, keep the cache clean
-        file_list = glob.glob(os.path.join(cache_dir, "{}*{}".format(name, ext)))
+        file_list = glob.glob(os.path.join(cache_dir, f"{name}*{ext}"))
         for file_path in file_list:
             os.remove(file_path)
 
@@ -5301,6 +5312,25 @@ def _get_policy_definitions(path="c:\\Windows\\PolicyDefinitions", language="en-
         log.debug("LGPO: Loading policy definitions")
         _load_policy_definitions(path=path, language=language)
     return __context__["lgpo.policy_definitions"]
+
+
+def clear_policy_cache():
+    """
+    Clears the policy definitions and resource stored in ``__context__``. They
+    will be rebuilt the next time a policy is applied.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' lgpo.clear_policy_cache
+    """
+    if "lgpo.policy_definitions" in __context__:
+        log.debug("LGPO: Removing cached policy definitions")
+        __context__.pop("lgpo.policy_definitions")
+    if "lgpo.policy_resources" in __context__:
+        log.debug("LGPO: Removing cached policy resources")
+        __context__.pop("lgpo.policy_resources")
 
 
 def _get_policy_resources(path="c:\\Windows\\PolicyDefinitions", language="en-US"):
@@ -5638,7 +5668,7 @@ def _set_advaudit_value(option, value):
     """
     # Set the values in both audit.csv files
     if not _set_advaudit_file_data(option=option, value=value):
-        raise CommandExecutionError("Failed to set audit.csv option: {}".format(option))
+        raise CommandExecutionError(f"Failed to set audit.csv option: {option}")
     # Apply the settings locally
     if not _set_advaudit_pol_data(option=option, value=value):
         # Only log this error, it will be in effect the next time the machine
@@ -5683,7 +5713,7 @@ def _get_netsh_value(profile, option):
 
 def _set_netsh_value(profile, section, option, value):
     if section not in ("firewallpolicy", "settings", "logging", "state"):
-        raise ValueError("LGPO: Invalid section: {}".format(section))
+        raise ValueError(f"LGPO: Invalid section: {section}")
     log.trace(
         "LGPO: Setting the following\nProfile: %s\nSection: %s\nOption: %s\nValue: %s",
         profile,
@@ -5727,7 +5757,7 @@ def _load_secedit_data():
     Returns:
         str: The contents of the file generated by the secedit command
     """
-    f_exp = os.path.join(__opts__["cachedir"], "secedit-{}.txt".format(UUID))
+    f_exp = os.path.join(__opts__["cachedir"], f"secedit-{UUID}.txt")
     try:
         __salt__["cmd.run"](["secedit", "/export", "/cfg", f_exp])
         with salt.utils.files.fopen(f_exp, encoding="utf-16") as fp:
@@ -5777,7 +5807,7 @@ def _write_secedit_data(inf_data):
     # Set file names
     # The database must persist in order for the settings to remain in effect
     f_sdb = os.path.join(os.getenv("WINDIR"), "security", "database", "salt.sdb")
-    f_inf = os.path.join(__opts__["cachedir"], "secedit-{}.inf".format(UUID))
+    f_inf = os.path.join(__opts__["cachedir"], f"secedit-{UUID}.inf")
 
     try:
         # Write the changes to the inf file
@@ -5937,9 +5967,7 @@ def _getAdmlPresentationRefId(adml_data, ref_id):
     """
     helper function to check for a presentation label for a policy element
     """
-    search_results = adml_data.xpath(
-        '//*[@*[local-name() = "refId"] = "{}"]'.format(ref_id)
-    )
+    search_results = adml_data.xpath(f'//*[@*[local-name() = "refId"] = "{ref_id}"]')
     alternate_label = ""
     if search_results:
         for result in search_results:
@@ -6205,7 +6233,7 @@ def _encode_string(value):
     elif not isinstance(value, str):
         # Should we raise an error here, or attempt to cast to a string
         raise TypeError(
-            "Value {} is not a string type\nType: {}".format(repr(value), type(value))
+            f"Value {repr(value)} is not a string type\nType: {type(value)}"
         )
     return b"".join([value.encode("utf-16-le"), encoded_null])
 
@@ -6246,7 +6274,7 @@ def _buildKnownDataSearchString(
                 encoded_semicolon,
                 chr(registry.vtype[reg_vtype]).encode("utf-32-le"),
                 encoded_semicolon,
-                chr(len(" {}".format(chr(0)).encode("utf-16-le"))).encode("utf-32-le"),
+                chr(len(f" {chr(0)}".encode("utf-16-le"))).encode("utf-32-le"),
                 encoded_semicolon,
                 " ".encode("utf-16-le"),
                 encoded_null,
@@ -6426,7 +6454,7 @@ def _processValueItem(
                             encoded_semicolon,
                             chr(registry.vtype[this_vtype]).encode("utf-32-le"),
                             encoded_semicolon,
-                            chr(len(" {}".format(chr(0)).encode("utf-16-le"))).encode(
+                            chr(len(f" {chr(0)}".encode("utf-16-le"))).encode(
                                 "utf-32-le"
                             ),
                             encoded_semicolon,
@@ -6481,7 +6509,7 @@ def _processValueItem(
                                 encoded_semicolon,
                                 chr(
                                     len(
-                                        "{}{}".format(element_values[i], chr(0)).encode(
+                                        f"{element_values[i]}{chr(0)}".encode(
                                             "utf-16-le"
                                         )
                                     )
@@ -6512,9 +6540,7 @@ def _processValueItem(
                         encoded_semicolon,
                         chr(registry.vtype[this_vtype]).encode("utf-32-le"),
                         encoded_semicolon,
-                        chr(len(" {}".format(chr(0)).encode("utf-16-le"))).encode(
-                            "utf-32-le"
-                        ),
+                        chr(len(f" {chr(0)}".encode("utf-16-le"))).encode("utf-32-le"),
                         encoded_semicolon,
                         " ".encode("utf-16-le"),
                         encoded_null,
@@ -6578,9 +6604,7 @@ def _processValueItem(
                     encoded_semicolon,
                     chr(registry.vtype[this_vtype]).encode("utf-32-le"),
                     encoded_semicolon,
-                    chr(len(" {}".format(chr(0)).encode("utf-16-le"))).encode(
-                        "utf-32-le"
-                    ),
+                    chr(len(f" {chr(0)}".encode("utf-16-le"))).encode("utf-32-le"),
                     encoded_semicolon,
                     " ".encode("utf-16-le"),
                     encoded_null,
@@ -6632,10 +6656,10 @@ def _checkAllAdmxPolicies(
     if policy_file_data:
         log.trace("POLICY CLASS %s has file data", policy_class)
         policy_filedata_split = re.sub(
-            salt.utils.stringutils.to_bytes(r"\]{}$".format(chr(0))),
+            salt.utils.stringutils.to_bytes(rf"\]{chr(0)}$"),
             b"",
             re.sub(
-                salt.utils.stringutils.to_bytes(r"^\[{}".format(chr(0))),
+                salt.utils.stringutils.to_bytes(rf"^\[{chr(0)}"),
                 b"",
                 re.sub(
                     re.escape(REG_POL_HEADER.encode("utf-16-le")),
@@ -6649,7 +6673,7 @@ def _checkAllAdmxPolicies(
         # Get the policy for each item defined in Registry.pol
         for policy_item in policy_filedata_split:
             policy_item_key = (
-                policy_item.split("{};".format(chr(0)).encode("utf-16-le"))[0]
+                policy_item.split(f"{chr(0)};".encode("utf-16-le"))[0]
                 .decode("utf-16-le")
                 .lower()
             )
@@ -6915,7 +6939,7 @@ def _checkAllAdmxPolicies(
 
                             if etree.QName(child_item).localname == "boolean":
                                 # https://msdn.microsoft.com/en-us/library/dn605978(v=vs.85).aspx
-                                if child_item is not None:
+                                if len(child_item) > 0:
                                     if (
                                         TRUE_VALUE_XPATH(child_item)
                                         and this_element_name not in configured_elements
@@ -6928,9 +6952,9 @@ def _checkAllAdmxPolicies(
                                             TRUE_VALUE_XPATH,
                                             policy_file_data,
                                         ):
-                                            configured_elements[
-                                                this_element_name
-                                            ] = True
+                                            configured_elements[this_element_name] = (
+                                                True
+                                            )
                                             log.trace(
                                                 "element %s is configured true",
                                                 child_item.attrib["id"],
@@ -6947,9 +6971,9 @@ def _checkAllAdmxPolicies(
                                             FALSE_VALUE_XPATH,
                                             policy_file_data,
                                         ):
-                                            configured_elements[
-                                                this_element_name
-                                            ] = False
+                                            configured_elements[this_element_name] = (
+                                                False
+                                            )
                                             policy_disabled_elements = (
                                                 policy_disabled_elements + 1
                                             )
@@ -6971,9 +6995,9 @@ def _checkAllAdmxPolicies(
                                             TRUE_LIST_XPATH,
                                             policy_file_data,
                                         ):
-                                            configured_elements[
-                                                this_element_name
-                                            ] = True
+                                            configured_elements[this_element_name] = (
+                                                True
+                                            )
                                             log.trace(
                                                 "element %s is configured true",
                                                 child_item.attrib["id"],
@@ -6990,9 +7014,9 @@ def _checkAllAdmxPolicies(
                                             FALSE_LIST_XPATH,
                                             policy_file_data,
                                         ):
-                                            configured_elements[
-                                                this_element_name
-                                            ] = False
+                                            configured_elements[this_element_name] = (
+                                                False
+                                            )
                                             policy_disabled_elements = (
                                                 policy_disabled_elements + 1
                                             )
@@ -7092,9 +7116,9 @@ def _checkAllAdmxPolicies(
                                         ),
                                         policy_file_data,
                                     )
-                                    configured_elements[
-                                        this_element_name
-                                    ] = configured_value
+                                    configured_elements[this_element_name] = (
+                                        configured_value
+                                    )
                                     log.trace(
                                         "element %s is enabled, value == %s",
                                         child_item.attrib["id"],
@@ -7214,9 +7238,9 @@ def _checkAllAdmxPolicies(
                                         policy_file_data,
                                         return_value_name=return_value_name,
                                     )
-                                    configured_elements[
-                                        this_element_name
-                                    ] = configured_value
+                                    configured_elements[this_element_name] = (
+                                        configured_value
+                                    )
                                     log.trace(
                                         "element %s is enabled values: %s",
                                         child_item.attrib["id"],
@@ -7412,7 +7436,7 @@ def _build_parent_list(policy_definition, return_full_policy_names, adml_languag
     parent_list = []
     policy_namespace = next(iter(policy_definition.nsmap))
     parent_category = policy_definition.xpath(
-        "{}:parentCategory/@ref".format(policy_namespace),
+        f"{policy_namespace}:parentCategory/@ref",
         namespaces=policy_definition.nsmap,
     )
     admx_policy_definitions = _get_policy_definitions(language=adml_language)
@@ -7483,14 +7507,14 @@ def _admx_policy_parent_walk(
         )
         path.append(this_parent_name)
         if tparent_category.xpath(
-            "{}:parentCategory/@ref".format(policy_namespace), namespaces=policy_nsmap
+            f"{policy_namespace}:parentCategory/@ref", namespaces=policy_nsmap
         ):
             # parent has a parent
             path = _admx_policy_parent_walk(
                 path=path,
                 policy_namespace=policy_namespace,
                 parent_category=tparent_category.xpath(
-                    "{}:parentCategory/@ref".format(policy_namespace),
+                    f"{policy_namespace}:parentCategory/@ref",
                     namespaces=policy_nsmap,
                 )[0],
                 policy_nsmap=policy_nsmap,
@@ -8522,7 +8546,7 @@ def _lookup_admin_template(policy_name, policy_class, adml_language="en-US"):
         False,
         None,
         [],
-        "Unable to find {} policy {}".format(policy_class, policy_name),
+        f"Unable to find {policy_class} policy {policy_name}",
     )
 
 
@@ -8677,8 +8701,8 @@ def get_policy_info(policy_name, policy_class, adml_language="en-US"):
     }
     policy_class = policy_class.title()
     policy_data = _policy_info()
-    if policy_class not in policy_data.policies.keys():
-        policy_classes = ", ".join(policy_data.policies.keys())
+    if policy_class not in policy_data.policies:
+        policy_classes = ", ".join(policy_data.policies)
         ret["message"] = (
             'The requested policy class "{}" is invalid, '
             "policy_class should be one of: {}"
@@ -9183,7 +9207,7 @@ def _get_policy_adm_setting(
                     )
                     if etree.QName(child_item).localname == "boolean":
                         # https://msdn.microsoft.com/en-us/library/dn605978(v=vs.85).aspx
-                        if child_item is not None:
+                        if len(child_item) > 0:
                             if (
                                 TRUE_VALUE_XPATH(child_item)
                                 and this_element_name not in configured_elements
@@ -9392,23 +9416,23 @@ def _get_policy_adm_setting(
                                             log.trace(
                                                 "all valueList items exist in file"
                                             )
-                                            configured_elements[
-                                                this_element_name
-                                            ] = _getAdmlDisplayName(
+                                            configured_elements[this_element_name] = (
+                                                _getAdmlDisplayName(
+                                                    adml_xml_data=adml_policy_resources,
+                                                    display_name=enum_item.attrib[
+                                                        "displayName"
+                                                    ],
+                                                )
+                                            )
+                                            break
+                                    else:
+                                        configured_elements[this_element_name] = (
+                                            _getAdmlDisplayName(
                                                 adml_xml_data=adml_policy_resources,
                                                 display_name=enum_item.attrib[
                                                     "displayName"
                                                 ],
                                             )
-                                            break
-                                    else:
-                                        configured_elements[
-                                            this_element_name
-                                        ] = _getAdmlDisplayName(
-                                            adml_xml_data=adml_policy_resources,
-                                            display_name=enum_item.attrib[
-                                                "displayName"
-                                            ],
                                         )
                                         break
                     elif etree.QName(child_item).localname == "list":
@@ -9543,12 +9567,12 @@ def _get_policy_adm_setting(
         this_policy_namespace in policy_vals
         and this_policy_name in policy_vals[this_policy_namespace]
     ):
-        hierarchy.setdefault(this_policy_namespace, {})[
-            this_policy_name
-        ] = _build_parent_list(
-            policy_definition=admx_policy,
-            return_full_policy_names=return_full_policy_names,
-            adml_language=adml_language,
+        hierarchy.setdefault(this_policy_namespace, {})[this_policy_name] = (
+            _build_parent_list(
+                policy_definition=admx_policy,
+                return_full_policy_names=return_full_policy_names,
+                adml_language=adml_language,
+            )
         )
 
     if policy_vals and return_full_policy_names and not hierarchical_return:
@@ -9702,7 +9726,7 @@ def get_policy(
         raise SaltInvocationError("policy_class must be defined")
     policy_class = policy_class.title()
     policy_data = _policy_info()
-    if policy_class not in policy_data.policies.keys():
+    if policy_class not in policy_data.policies:
         policy_classes = ", ".join(policy_data.policies.keys())
         raise CommandExecutionError(
             'The requested policy class "{}" is invalid, policy_class should '

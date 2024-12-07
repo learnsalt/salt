@@ -10,6 +10,7 @@ import salt.exceptions
 pytestmark = [
     pytest.mark.windows_whitelisted,
     pytest.mark.skip_unless_on_windows,
+    pytest.mark.slow_test,
 ]
 
 
@@ -78,7 +79,7 @@ def ps1_file_multiple():
                 Ensure          = "Present"
                 Contents        = "Hello World from DSC!"
             }
-            
+
             # The File resource can ensure the state of files, or copy them from a source to a destination with persistent updates.
             File HelloWorld2 {
                 DestinationPath = "C:\Temp\HelloWorld2.txt"
@@ -166,7 +167,7 @@ def test_compile_config_missing(dsc):
     path = "C:\\Path\\not\\exists.ps1"
     with pytest.raises(salt.exceptions.CommandExecutionError) as exc:
         dsc.compile_config(path=path)
-    assert exc.value.message == "{} not found".format(path)
+    assert exc.value.message == f"{path} not found"
 
 
 @pytest.mark.destructive_test
@@ -203,7 +204,7 @@ def test_apply_config_missing(dsc):
     path = "C:\\Path\\not\\exists"
     with pytest.raises(salt.exceptions.CommandExecutionError) as exc:
         dsc.apply_config(path=path)
-    assert exc.value.message == "{} not found".format(path)
+    assert exc.value.message == f"{path} not found"
 
 
 @pytest.mark.destructive_test

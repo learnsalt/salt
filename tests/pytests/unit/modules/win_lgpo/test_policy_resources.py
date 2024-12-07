@@ -1,6 +1,7 @@
 """
 :codeauthor: Shane Lee <slee@saltstack.com>
 """
+
 import pytest
 
 import salt.modules.cmdmod as cmdmod
@@ -13,6 +14,7 @@ import salt.utils.win_reg as win_reg
 pytestmark = [
     pytest.mark.windows_whitelisted,
     pytest.mark.skip_unless_on_windows,
+    pytest.mark.slow_test,
 ]
 
 

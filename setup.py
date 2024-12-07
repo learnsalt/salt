@@ -3,17 +3,14 @@
 The setup script for salt
 """
 
-# pylint: disable=file-perms,resource-leakage
+# pylint: disable=file-perms,resource-leakage,deprecated-module
 import setuptools  # isort:skip
-
-import contextlib
 import distutils.dist
 import glob
 import os
-import platform
+import subprocess
 import sys
 import warnings
-from ctypes.util import find_library
 from datetime import datetime
 
 # pylint: disable=no-name-in-module
@@ -173,8 +170,9 @@ if os.path.exists(SALT_VERSION_HARDCODED):
     with open(SALT_VERSION_HARDCODED, encoding="utf-8") as rfh:
         SALT_VERSION = rfh.read().strip()
 else:
-    exec(compile(open(SALT_VERSION_MODULE).read(), SALT_VERSION_MODULE, "exec"))
-    SALT_VERSION = str(__saltstack_version__)  # pylint: disable=undefined-variable
+    SALT_VERSION = (
+        subprocess.check_output([sys.executable, SALT_VERSION_MODULE]).decode().strip()
+    )
 # pylint: enable=W0122
 
 
@@ -183,7 +181,7 @@ else:
 
 def _parse_requirements_file(requirements_file):
     parsed_requirements = []
-    with open(requirements_file) as rfh:
+    with open(requirements_file, encoding="utf-8") as rfh:
         for line in rfh.readlines():
             line = line.strip()
             if not line or line.startswith(("#", "-r", "--")):
@@ -233,6 +231,11 @@ class WriteSaltVersion(Command):
                 salt_version = SaltStackVersion.parse(
                     self.distribution.with_salt_version
                 )
+            if os.path.exists(self.distribution.salt_version_hardcoded_path):
+                log.warn(
+                    "The 'salt/_version.txt' file already exists. Not overwriting it."
+                )
+                return
 
             with open(
                 self.distribution.salt_version_hardcoded_path, "w", encoding="utf-8"
@@ -257,7 +260,9 @@ class GenerateSaltSyspaths(Command):
             exit(1)
 
         # Write the system paths file
-        open(self.distribution.salt_syspaths_hardcoded_path, "w").write(
+        open(
+            self.distribution.salt_syspaths_hardcoded_path, "w", encoding="utf-8"
+        ).write(
             INSTALL_SYSPATHS_TEMPLATE.format(
                 date=DATE,
                 root_dir=self.distribution.salt_root_dir,
@@ -305,9 +310,9 @@ class WriteSaltSshPackagingFile(Command):
                 exit(1)
 
             # pylint: disable=E0602
-            open(self.distribution.salt_ssh_packaging_file, "w").write(
-                "Packaged for Salt-SSH\n"
-            )
+            open(
+                self.distribution.salt_ssh_packaging_file, "w", encoding="utf-8"
+            ).write("Packaged for Salt-SSH\n")
             # pylint: enable=E0602
 
 
@@ -366,12 +371,6 @@ class Develop(develop):
             self.generate_salt_syspaths = True
 
     def run(self):
-        if IS_WINDOWS_PLATFORM:
-            # Download the required DLLs
-            self.distribution.salt_download_windows_dlls = True
-            self.run_command("download-windows-dlls")
-            self.distribution.salt_download_windows_dlls = None
-
         if self.write_salt_version is True:
             self.distribution.running_salt_install = True
             self.distribution.salt_version_hardcoded_path = SALT_VERSION_HARDCODED
@@ -383,91 +382,6 @@ class Develop(develop):
 
         # Resume normal execution
         develop.run(self)
-
-
-class DownloadWindowsDlls(Command):
-
-    description = "Download required DLL's for windows"
-
-    def initialize_options(self):
-        pass
-
-    def finalize_options(self):
-        pass
-
-    def run(self):
-        if getattr(self.distribution, "salt_download_windows_dlls", None) is None:
-            print("This command is not meant to be called on it's own")
-            exit(1)
-        try:
-            import pip
-
-            # pip has moved many things to `_internal` starting with pip 10
-            if LooseVersion(pip.__version__) < LooseVersion("10.0"):
-                # pylint: disable=no-name-in-module
-                from pip.utils.logging import indent_log
-
-                # pylint: enable=no-name-in-module
-            else:
-                from pip._internal.utils.logging import (  # pylint: disable=no-name-in-module
-                    indent_log,
-                )
-        except ImportError:
-            # TODO: Impliment indent_log here so we don't require pip
-            @contextlib.contextmanager
-            def indent_log():
-                yield
-
-        platform_bits, _ = platform.architecture()
-        url = "https://repo.saltproject.io/windows/dependencies/{bits}/{fname}"
-        dest = os.path.join(os.path.dirname(sys.executable), "{fname}")
-        with indent_log():
-            for fname in (
-                "openssl/1.1.1k/ssleay32.dll",
-                "openssl/1.1.1k/libeay32.dll",
-            ):
-                # See if the library is already on the system
-                if find_library(fname):
-                    continue
-                furl = url.format(bits=platform_bits[:2], fname=fname)
-                fdest = dest.format(fname=os.path.basename(fname))
-                if not os.path.exists(fdest):
-                    log.info("Downloading {} to {} from {}".format(fname, fdest, furl))
-                    try:
-                        from contextlib import closing
-
-                        import requests
-
-                        with closing(requests.get(furl, stream=True)) as req:
-                            if req.status_code == 200:
-                                with open(fdest, "wb") as wfh:
-                                    for chunk in req.iter_content(chunk_size=4096):
-                                        if chunk:  # filter out keep-alive new chunks
-                                            wfh.write(chunk)
-                                            wfh.flush()
-                            else:
-                                log.error(
-                                    "Failed to download {} to {} from {}".format(
-                                        fname, fdest, furl
-                                    )
-                                )
-                    except ImportError:
-                        req = urlopen(furl)
-
-                        if req.getcode() == 200:
-                            with open(fdest, "wb") as wfh:
-                                while True:
-                                    chunk = req.read(4096)
-                                    if not chunk:
-                                        break
-                                    wfh.write(chunk)
-                                    wfh.flush()
-                        else:
-                            log.error(
-                                "Failed to download {} to {} from {}".format(
-                                    fname, fdest, furl
-                                )
-                            )
 
 
 class Sdist(sdist):
@@ -551,7 +465,7 @@ class CloudSdist(Sdist):  # pylint: disable=too-many-ancestors
             try:
                 import requests
 
-                req = requests.get(url)
+                req = requests.get(url, timeout=120)
                 if req.status_code == 200:
                     script_contents = req.text.encode(req.encoding)
                 else:
@@ -570,10 +484,11 @@ class CloudSdist(Sdist):  # pylint: disable=too-many-ancestors
                         "Error code: {}".format(req.getcode())
                     )
             try:
-                with open(deploy_path, "w") as fp_:
+                with open(deploy_path, "w", encoding="utf-8") as fp_:
                     fp_.write(script_contents)
             except OSError as err:
-                log.error("Failed to write the updated script: {}".format(err))
+                errmsg = f"Failed to write the updated script: {err}"
+                log.error(errmsg)
 
         # Let's the rest of the build command
         Sdist.run(self)
@@ -632,7 +547,7 @@ class Clean(clean):
         for subdir in ("salt", "tests", "doc"):
             root = os.path.join(os.path.dirname(__file__), subdir)
             for dirname, _, _ in os.walk(root):
-                for to_remove_filename in glob.glob("{}/*.py[oc]".format(dirname)):
+                for to_remove_filename in glob.glob(f"{dirname}/*.py[oc]"):
                     os.remove(to_remove_filename)
 
 
@@ -735,11 +650,6 @@ class Install(install):
         self.distribution.salt_version_hardcoded_path = os.path.join(
             self.build_lib, "salt", "_version.txt"
         )
-        if IS_WINDOWS_PLATFORM:
-            # Download the required DLLs
-            self.distribution.salt_download_windows_dlls = True
-            self.run_command("download-windows-dlls")
-            self.distribution.salt_download_windows_dlls = None
         # need to ensure _version.txt is created in build dir before install
         if not os.path.exists(os.path.join(self.build_lib)):
             if not self.skip_build:
@@ -942,14 +852,12 @@ class SaltDistribution(distutils.dist.Distribution):
         with open(SALT_LONG_DESCRIPTION_FILE, encoding="utf-8") as f:
             self.long_description = f.read()
         self.long_description_content_type = "text/x-rst"
-        self.python_requires = ">=3.6"
+        self.python_requires = ">=3.8"
         self.classifiers = [
             "Programming Language :: Python",
             "Programming Language :: Cython",
             "Programming Language :: Python :: 3",
             "Programming Language :: Python :: 3 :: Only",
-            "Programming Language :: Python :: 3.6",
-            "Programming Language :: Python :: 3.7",
             "Programming Language :: Python :: 3.8",
             "Programming Language :: Python :: 3.9",
             "Programming Language :: Python :: 3.10",
@@ -982,8 +890,6 @@ class SaltDistribution(distutils.dist.Distribution):
         )
         if not IS_WINDOWS_PLATFORM:
             self.cmdclass.update({"sdist": CloudSdist, "install_lib": InstallLib})
-        if IS_WINDOWS_PLATFORM:
-            self.cmdclass.update({"download-windows-dlls": DownloadWindowsDlls})
         if HAS_BDIST_WHEEL:
             self.cmdclass["bdist_wheel"] = BDistWheel
 
@@ -1005,8 +911,8 @@ class SaltDistribution(distutils.dist.Distribution):
                 continue
             if attrname == "salt_version":
                 attrname = "version"
-            if hasattr(self.metadata, "set_{}".format(attrname)):
-                getattr(self.metadata, "set_{}".format(attrname))(attrvalue)
+            if hasattr(self.metadata, f"set_{attrname}"):
+                getattr(self.metadata, f"set_{attrname}")(attrvalue)
             elif hasattr(self.metadata, attrname):
                 try:
                     setattr(self.metadata, attrname, attrvalue)
@@ -1124,45 +1030,6 @@ class SaltDistribution(distutils.dist.Distribution):
                 for reqfile in SALT_BASE_REQUIREMENTS:
                     install_requires += _parse_requirements_file(reqfile)
         return install_requires
-
-    @property
-    def _property_scripts(self):
-        # Scripts common to all scenarios
-        scripts = ["scripts/salt-call"]
-        if self.ssh_packaging or PACKAGED_FOR_SALT_SSH:
-            scripts.append("scripts/salt-ssh")
-            if IS_WINDOWS_PLATFORM and not os.environ.get("SALT_BUILD_ALL_BINS"):
-                return scripts
-            scripts.extend(["scripts/salt-cloud", "scripts/spm"])
-            return scripts
-
-        if IS_WINDOWS_PLATFORM and not os.environ.get("SALT_BUILD_ALL_BINS"):
-            scripts.extend(
-                [
-                    "scripts/salt-cp",
-                    "scripts/salt-minion",
-                ]
-            )
-            return scripts
-
-        # *nix, so, we need all scripts
-        scripts.extend(
-            [
-                "scripts/salt",
-                "scripts/salt-api",
-                "scripts/salt-cloud",
-                "scripts/salt-cp",
-                "scripts/salt-key",
-                "scripts/salt-master",
-                "scripts/salt-minion",
-                "scripts/salt-proxy",
-                "scripts/salt-run",
-                "scripts/salt-ssh",
-                "scripts/salt-syndic",
-                "scripts/spm",
-            ]
-        )
-        return scripts
 
     @property
     def _property_entry_points(self):
@@ -1360,5 +1227,10 @@ class SaltDistribution(distutils.dist.Distribution):
 if __name__ == "__main__":
     warnings.warn(
         "Warning: distutils is deprecated and shall be removed in Python 3.12, advise migrate to using setuptools"
+    )
+    warnings.warn(
+        "In Salt 3009, the `setup.py` file will be stripped of it's custom additions and migrated to a plain "
+        "`pyproject.toml` python package or whatever is found best during the process of removing the customizations. "
+        "If you're relying on these customizations please stop as your workflow will break in the future."
     )
     setup(distclass=SaltDistribution)

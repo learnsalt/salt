@@ -1,6 +1,7 @@
 """
 Simple Smoke Tests for Connected Proxy Minion
 """
+
 import logging
 
 import pytest
@@ -10,7 +11,8 @@ log = logging.getLogger(__name__)
 pytestmark = [
     pytest.mark.skip_on_spawning_platform(
         reason="Deltaproxy minions do not currently work on spawning platforms.",
-    )
+    ),
+    pytest.mark.slow_test,
 ]
 
 

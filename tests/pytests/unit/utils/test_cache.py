@@ -5,6 +5,7 @@
     Test the salt cache objects
 """
 
+import logging
 import pathlib
 import time
 
@@ -138,7 +139,7 @@ def test_set_cache(minion_opts, cache_mods_path, cache_mod_name, cache_dir):
     assert cache_test_func()["called"] == 1
     assert cache_test_func()["called"] == 2
 
-    cache_file_name = "salt.loaded.ext.rawmodule.{}.p".format(cache_mod_name)
+    cache_file_name = f"salt.loaded.ext.rawmodule.{cache_mod_name}.p"
 
     cached_file = cache_dir / "context" / cache_file_name
     assert cached_file.exists()
@@ -150,9 +151,7 @@ def test_set_cache(minion_opts, cache_mods_path, cache_mod_name, cache_dir):
     assert target_cache_data == dict(context, called=1)
 
     # Test cache de-serialize
-    cc = cache.ContextCache(
-        minion_opts, "salt.loaded.ext.rawmodule.{}".format(cache_mod_name)
-    )
+    cc = cache.ContextCache(minion_opts, f"salt.loaded.ext.rawmodule.{cache_mod_name}")
     retrieved_cache = cc.get_cache_context()
     assert retrieved_cache == dict(context, called=1)
 
@@ -221,7 +220,7 @@ def test_everything(cache_dir):
         b"\xc3\x83\xc2\xa6\xc3\x83\xc2\xb8\xc3\x83\xc2\xa5",
     ],
 )
-def test_unicode_error(cache_dir, data):
+def test_unicode_error(cache_dir, data, caplog):
     """
     Test when the data in the cache raises a UnicodeDecodeError
     we do not raise an error.
@@ -240,9 +239,17 @@ def test_unicode_error(cache_dir, data):
             }
         }
     }
-    with patch.object(salt.utils.msgpack, "load", return_value=cache_data):
+    with patch.object(
+        salt.utils.msgpack, "load", return_value=cache_data
+    ), caplog.at_level(logging.DEBUG):
         cd = cache.CacheDisk(0.3, str(path))
-        assert cd._dict == cache_data
+        # this test used to rely on msgpack throwing errors if attempt to read an empty file
+        # code now checks if file empty and returns, so we should never attempt msgpack load
+        assert cd._dict == {}
+        assert not (
+            f"Error reading cache file at '{path}': Unpack failed: incomplete input"
+            in caplog.messages
+        )
 
 
 def test_cache_corruption(cache_dir):

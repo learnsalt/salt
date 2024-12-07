@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
 Script that builds Python from source using the Relative Environment for Python
 project (relenv):
@@ -11,37 +11,24 @@ as created by the Python installer. This includes all header files, scripts,
 dlls, library files, and pip.
 
 .EXAMPLE
-build_python.ps1 -Version 3.8.16 -Architecture x86
+build_python.ps1 -Version 3.10.9 -Architecture x86
 
 #>
 param(
     [Parameter(Mandatory=$false)]
     [ValidatePattern("^\d{1,2}.\d{1,2}.\d{1,2}$")]
-    [ValidateSet(
-        #"3.10.5",
-        #"3.10.4",
-        #"3.10.3",
-        #"3.9.13",
-        #"3.9.12",
-        #"3.9.11",
-        "3.8.16",
-        "3.8.15",
-        "3.8.14",
-        "3.8.13",
-        "3.8.12",
-        "3.8.11",
-        "3.8.10"
-    )]
     [Alias("v")]
-    # The version of Python to be built. Pythonnet only supports up to Python
-    # 3.8 for now. Pycurl stopped building wheel files after 7.43.0.5 which
-    # supported up to 3.8. So we're pinned to the latest version of Python 3.8.
-    # We may have to drop support for pycurl or build it ourselves.
-    # Default is: 3.8.16
-    [String] $Version = "3.8.16",
+    # The version of python to build/fetch. This is tied to the version of
+    # Relenv
+    [String] $Version,
 
     [Parameter(Mandatory=$false)]
-    [ValidateSet("x64", "x86")]
+    [Alias("r")]
+    # The version of Relenv to install
+    [String] $RelenvVersion,
+
+    [Parameter(Mandatory=$false)]
+    [ValidateSet("x64", "x86", "amd64")]
     [Alias("a")]
     # The System Architecture to build. "x86" will build a 32-bit installer.
     # "x64" will build a 64-bit installer. Default is: x64
@@ -51,7 +38,12 @@ param(
     [Alias("b")]
     # Build python from source instead of fetching a tarball
     # Requires VC Build Tools
-    [Switch] $Build
+    [Switch] $Build,
+
+    [Parameter(Mandatory=$false)]
+    [Alias("c")]
+    # Don't pretify the output of the Write-Result
+    [Switch] $CICD
 
 )
 
@@ -63,13 +55,45 @@ param(
 $ProgressPreference = "SilentlyContinue"
 $ErrorActionPreference = "Stop"
 
+if ( $Architecture -eq "amd64" ) {
+  $Architecture = "x64"
+}
+
 #-------------------------------------------------------------------------------
 # Script Functions
 #-------------------------------------------------------------------------------
 
 function Write-Result($result, $ForegroundColor="Green") {
-    $position = 80 - $result.Length - [System.Console]::CursorLeft
-    Write-Host -ForegroundColor $ForegroundColor ("{0,$position}$result" -f "")
+    if ( $CICD ) {
+        Write-Host $result -ForegroundColor $ForegroundColor
+    } else {
+        $position = 80 - $result.Length - [System.Console]::CursorLeft
+        Write-Host -ForegroundColor $ForegroundColor ("{0,$position}$result" -f "")
+    }}
+
+#-------------------------------------------------------------------------------
+# Verify Python and Relenv Versions
+#-------------------------------------------------------------------------------
+
+$yaml = Get-Content -Path "$PROJECT_DIR\cicd\shared-gh-workflows-context.yml"
+$dict_versions = @{}
+$dict_versions["python_version"]=($yaml | Select-String -Pattern "python_version: (.*)").matches.groups[1].Value.Trim("""")
+$dict_versions["relenv_version"]=($yaml | Select-String -Pattern "relenv_version: (.*)").matches.groups[1].Value.Trim("""")
+
+if ( [String]::IsNullOrEmpty($Version) ) {
+    $Version = $dict_versions["python_version"]
+    if ( [String]::IsNullOrEmpty($Version) ) {
+        Write-Host "Failed to load Python Version"
+        exit 1
+    }
+}
+
+if ( [String]::IsNullOrEmpty($RelenvVersion) ) {
+    $RelenvVersion = $dict_versions["relenv_version"]
+    if ( [String]::IsNullOrEmpty($RelenvVersion) ) {
+        Write-Host "Failed to load Relenv Version"
+        exit 1
+    }
 }
 
 #-------------------------------------------------------------------------------
@@ -84,6 +108,7 @@ if ( $Build ) {
 }
 Write-Host "$SCRIPT_MSG" -ForegroundColor Cyan
 Write-Host "- Python Version: $Version"
+Write-Host "- Relenv Version: $RelenvVersion"
 Write-Host "- Architecture:   $Architecture"
 Write-Host "- Build:          $Build"
 Write-Host $("-" * 80)
@@ -148,9 +173,8 @@ if ( $env:VIRTUAL_ENV ) {
 #-------------------------------------------------------------------------------
 $SCRIPT_DIR   = (Get-ChildItem "$($myInvocation.MyCommand.Definition)").DirectoryName
 $BUILD_DIR    = "$SCRIPT_DIR\buildenv"
-$SCRIPTS_DIR  = "$BUILD_DIR\Scripts"
 $RELENV_DIR   = "${env:LOCALAPPDATA}\relenv"
-$SYS_PY_BIN   = (cmd /c "where python")
+$SYS_PY_BIN   = (python -c "import sys; print(sys.executable)")
 $BLD_PY_BIN   = "$BUILD_DIR\Scripts\python.exe"
 $SALT_DEP_URL = "https://repo.saltproject.io/windows/dependencies"
 
@@ -226,7 +250,7 @@ if ( $env:VIRTUAL_ENV ) {
 # Installing Relenv
 #-------------------------------------------------------------------------------
 Write-Host "Installing Relenv: " -NoNewLine
-pip install relenv --disable-pip-version-check | Out-Null
+pip install relenv==$RelenvVersion --disable-pip-version-check | Out-Null
 $output = pip list --disable-pip-version-check
 if ("relenv" -in $output.split()) {
     Write-Result "Success" -ForegroundColor Green
@@ -234,52 +258,35 @@ if ("relenv" -in $output.split()) {
     Write-Result "Failed" -ForegroundColor Red
     exit 1
 }
+$env:RELENV_FETCH_VERSION=$RelenvVersion
 
 #-------------------------------------------------------------------------------
 # Building Python with Relenv
 #-------------------------------------------------------------------------------
 if ( $Build ) {
     Write-Host "Building Python with Relenv (long-running): " -NoNewLine
-    $output = relenv build --clean --arch $ARCH
+    $output = relenv build --clean --python $Version --arch $ARCH
 } else {
     Write-Host "Fetching Python with Relenv: " -NoNewLine
-    relenv fetch --arch $ARCH | Out-Null
-}
-if ( Test-Path -Path "$RELENV_DIR\build\$ARCH-win.tar.xz") {
-    Write-Result "Success" -ForegroundColor Green
-} else {
-    Write-Result "Failed" -ForegroundColor Red
-    exit 1
+    relenv fetch --python $Version --arch $ARCH | Out-Null
+    if ( Test-Path -Path "$RELENV_DIR\build\$Version-$ARCH-win.tar.xz") {
+        Write-Result "Success" -ForegroundColor Green
+    } else {
+        Write-Result "Failed" -ForegroundColor Red
+        exit 1
+    }
 }
 
 #-------------------------------------------------------------------------------
 # Extracting Python environment
 #-------------------------------------------------------------------------------
 Write-Host "Extracting Python environment: " -NoNewLine
-relenv create --arch $ARCH "$BUILD_DIR"
+relenv create --python $Version --arch $ARCH "$BUILD_DIR"
 If ( Test-Path -Path "$BLD_PY_BIN" ) {
     Write-Result "Success" -ForegroundColor Green
 } else {
     Write-Result "Failed" -ForegroundColor Red
     exit 1
-}
-
-#-------------------------------------------------------------------------------
-# Retrieving SSL Libraries
-#-------------------------------------------------------------------------------
-$ssllibs = "libeay32.dll",
-           "ssleay32.dll"
-$ssllibs | ForEach-Object {
-    $url = "$SALT_DEP_URL/openssl/1.1.1k/$_"
-    $file = "$SCRIPTS_DIR\$_"
-    Write-Host "Retrieving $_`: " -NoNewline
-    Invoke-WebRequest -Uri "$url" -OutFile "$file" | Out-Null
-    if ( Test-Path -Path "$file" ) {
-        Write-Result "Success" -ForegroundColor Green
-    } else {
-        Write-Result "Failed" -ForegroundColor Red
-        exit 1
-    }
 }
 
 #-------------------------------------------------------------------------------

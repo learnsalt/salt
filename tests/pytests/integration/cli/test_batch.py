@@ -8,7 +8,7 @@ import salt.utils.platform
 
 pytestmark = [
     pytest.mark.windows_whitelisted,
-    #    pytest.mark.slow_test,
+    pytest.mark.core_test,
 ]
 
 
@@ -24,7 +24,7 @@ def test_batch_run(salt_cli, run_timeout, salt_sub_minion):
     """
     Tests executing a simple batch command to help catch regressions
     """
-    ret = "Executing run on [{}]".format(repr(salt_sub_minion.id))
+    ret = f"Executing run on [{repr(salt_sub_minion.id)}]"
     cmd = salt_cli.run(
         "test.echo",
         "batch testing",
@@ -59,8 +59,8 @@ def test_batch_run_grains_targeting(
     Tests executing a batch command using a percentage divisor as well as grains
     targeting.
     """
-    sub_min_ret = "Executing run on [{}]".format(repr(salt_sub_minion.id))
-    min_ret = "Executing run on [{}]".format(repr(salt_minion.id))
+    sub_min_ret = f"Executing run on [{repr(salt_sub_minion.id)}]"
+    min_ret = f"Executing run on [{repr(salt_minion.id)}]"
     cmd = salt_cli.run(
         "-C",
         "-b 25%",
@@ -141,7 +141,9 @@ def test_batch_state_stopping_after_error(
 
     # Executing salt with batch: 1 and with failhard. It should stop after the first error.
     cmd = salt_cli.run(
-        "state.single" "test.fail_without_changes" "name=test_me",
+        "state.single",
+        "test.fail_without_changes",
+        "name=test_me",
         "-b 1",
         "--out=yaml",
         "--failhard",
@@ -183,15 +185,7 @@ def test_batch_retcode(salt_cli, salt_minion, salt_sub_minion, run_timeout):
     # that's an issue with dependency versions that may be due to the versions
     # installed on the test images. When those issues are sorted, this can
     # simply `not cmd.stderr`.
-    assert (
-        not cmd.stderr
-        or cmd.stderr.endswith(
-            "jinja.py:736: DeprecationWarning: 'contextfunction' is renamed to 'pass_context', the old name will be removed in Jinja 3.1.\n  @contextfunction\n"
-        )
-        or cmd.stderr.endswith(
-            "process.py:54: DeprecationWarning: PY_SSIZE_T_CLEAN will be required for '#' formats\n  current = setproctitle.getproctitle()\n"
-        )
-    )
+    assert not cmd.stderr
     assert "true" in cmd.stdout
 
 
@@ -214,15 +208,7 @@ def test_multiple_modules_in_batch(salt_cli, salt_minion, salt_sub_minion, run_t
     # that's an issue with dependency versions that may be due to the versions
     # installed on the test images. When those issues are sorted, this can
     # simply `not cmd.stderr`.
-    assert (
-        not cmd.stderr
-        or cmd.stderr.endswith(
-            "process.py:54: DeprecationWarning: PY_SSIZE_T_CLEAN will be required for '#' formats\n  current = setproctitle.getproctitle()\n"
-        )
-        or cmd.stderr.endswith(
-            "jinja.py:736: DeprecationWarning: 'contextfunction' is renamed to 'pass_context', the old name will be removed in Jinja 3.1.\n  @contextfunction\n"
-        )
-    )
+    assert not cmd.stderr
 
 
 def test_batch_module_stopping_failed_respond(

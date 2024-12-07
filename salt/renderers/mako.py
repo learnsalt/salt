@@ -1,7 +1,14 @@
 """
 Mako Renderer for Salt
-"""
 
+This renderer requires the Mako library.
+
+To install Mako, do the following:
+
+.. code-block: bash
+
+    salt-pip install mako
+"""
 
 import io
 

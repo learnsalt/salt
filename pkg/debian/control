@@ -14,9 +14,18 @@ Vcs-Browser: https://github.com/saltstack/salt.git
 Vcs-Git: git://github.com/saltstack/salt.git
 
 
+Package: salt-dbg
+Architecture: amd64 arm64
+Section: debug
+Priority: extra
+Homepage: http://saltproject.io/
+Description: Salt debug symbols
+
+
 Package: salt-common
-Architecture: all
+Architecture: amd64 arm64
 Depends: ${misc:Depends}
+Breaks: salt-minion (<= 3006.4)
 Suggests: ifupdown
 Recommends: lsb-release
 Description: shared libraries that salt requires for all packages
@@ -41,7 +50,9 @@ Description: shared libraries that salt requires for all packages
 
 
 Package: salt-master
-Architecture: all
+Architecture: amd64 arm64
+Replaces: salt-common (<= 3006.4)
+Breaks: salt-common (<= 3006.4)
 Depends: salt-common (= ${source:Version}),
          ${misc:Depends}
 Description: remote manager to administer servers via salt
@@ -65,7 +76,9 @@ Description: remote manager to administer servers via salt
 
 
 Package: salt-minion
-Architecture: all
+Architecture: amd64 arm64
+Replaces: salt-common (<= 3006.4)
+Breaks: salt-common (<= 3006.4)
 Depends: bsdmainutils,
          dctrl-tools,
          salt-common (= ${source:Version}),
@@ -92,7 +105,7 @@ Description: client package for salt, the distributed remote execution system
 
 
 Package: salt-syndic
-Architecture: all
+Architecture: amd64 arm64
 Depends: salt-master (= ${source:Version}),
          ${misc:Depends}
 Description: master-of-masters for salt, the distributed remote execution system
@@ -117,7 +130,8 @@ Description: master-of-masters for salt, the distributed remote execution system
 
 
 Package: salt-ssh
-Architecture: all
+Architecture: amd64 arm64
+Breaks: salt-common (<= 3006.4)
 Depends: salt-common (= ${source:Version}),
          openssh-client,
          ${misc:Depends}
@@ -145,7 +159,8 @@ Description: remote manager to administer servers via Salt SSH
 
 
 Package: salt-cloud
-Architecture: all
+Architecture: amd64 arm64
+Breaks: salt-common (<= 3006.4)
 Depends: salt-common (= ${source:Version}),
          ${misc:Depends}
 Description: public cloud VM management system
@@ -154,7 +169,7 @@ Description: public cloud VM management system
 
 
 Package: salt-api
-Architecture: all
+Architecture: amd64 arm64
 Depends: salt-master,
          ${misc:Depends}
 Description: Generic, modular network access system

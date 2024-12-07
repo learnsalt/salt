@@ -4,45 +4,43 @@ import os
 import pathlib
 import shutil
 import sys
-from sysconfig import get_path
+import sysconfig
 
-import _pytest._version
 import attr
 import pytest
+import requests
 
+import salt.modules.aptpkg
 import salt.utils.files
 from tests.conftest import CODE_DIR
-
-PYTEST_GE_7 = getattr(_pytest._version, "version_tuple", (-1, -1)) >= (7, 0)
-
+from tests.support.mock import MagicMock, patch
 
 log = logging.getLogger(__name__)
 
 pytestmark = [
+    pytest.mark.timeout_unless_on_windows(120),
     pytest.mark.destructive_test,
     pytest.mark.skip_if_not_root,
+    pytest.mark.slow_test,
 ]
 
 
 @pytest.fixture
 def pkgrepo(states, grains):
     if grains["os_family"] != "Debian":
-        exc_kwargs = {}
-        if PYTEST_GE_7:
-            exc_kwargs["_use_item_location"] = True
         raise pytest.skip.Exception(
-            "Test only for debian based platforms", **exc_kwargs
+            "Test only for debian based platforms", _use_item_location=True
         )
     return states.pkgrepo
 
 
 @pytest.mark.requires_salt_states("pkgrepo.managed")
-def test_adding_repo_file(pkgrepo, tmp_path):
+def test_adding_repo_file(pkgrepo, repo_uri, tmp_path):
     """
     test adding a repo file using pkgrepo.managed
     """
     repo_file = str(tmp_path / "stable-binary.list")
-    repo_content = "deb http://www.deb-multimedia.org stable main"
+    repo_content = f"deb {repo_uri} stable main"
     ret = pkgrepo.managed(name=repo_content, file=repo_file, clean_file=True)
     with salt.utils.files.fopen(repo_file, "r") as fp:
         file_content = fp.read()
@@ -50,30 +48,24 @@ def test_adding_repo_file(pkgrepo, tmp_path):
 
 
 @pytest.mark.requires_salt_states("pkgrepo.managed")
-def test_adding_repo_file_arch(pkgrepo, tmp_path, subtests):
+def test_adding_repo_file_arch(pkgrepo, repo_uri, tmp_path, subtests):
     """
     test adding a repo file using pkgrepo.managed
     and setting architecture
     """
     repo_file = str(tmp_path / "stable-binary.list")
-    repo_content = "deb [arch=amd64  ] http://www.deb-multimedia.org stable main"
+    repo_content = f"deb [arch=amd64  ] {repo_uri} stable main"
     pkgrepo.managed(name=repo_content, file=repo_file, clean_file=True)
     with salt.utils.files.fopen(repo_file, "r") as fp:
         file_content = fp.read()
-        assert (
-            file_content.strip()
-            == "deb [arch=amd64] http://www.deb-multimedia.org stable main"
-        )
+        assert file_content.strip() == f"deb [arch=amd64] {repo_uri} stable main"
     with subtests.test("With multiple archs"):
-        repo_content = (
-            "deb [arch=amd64,i386  ] http://www.deb-multimedia.org stable main"
-        )
+        repo_content = f"deb [arch=amd64,i386  ] {repo_uri} stable main"
         pkgrepo.managed(name=repo_content, file=repo_file, clean_file=True)
         with salt.utils.files.fopen(repo_file, "r") as fp:
             file_content = fp.read()
             assert (
-                file_content.strip()
-                == "deb [arch=amd64,i386] http://www.deb-multimedia.org stable main"
+                file_content.strip() == f"deb [arch=amd64,i386] {repo_uri} stable main"
             )
 
 
@@ -96,7 +88,7 @@ def test_adding_repo_file_cdrom(pkgrepo, tmp_path):
 
 
 def system_aptsources_ids(value):
-    return "{}(aptsources.sourceslist)".format(value.title())
+    return f"{value.title()}(aptsources.sourceslist)"
 
 
 @pytest.fixture(
@@ -105,12 +97,9 @@ def system_aptsources_ids(value):
 def system_aptsources(request, grains):
     sys_modules = list(sys.modules)
     copied_paths = []
-    exc_kwargs = {}
-    if PYTEST_GE_7:
-        exc_kwargs["_use_item_location"] = True
     if grains["os_family"] != "Debian":
         raise pytest.skip.Exception(
-            "Test only for debian based platforms", **exc_kwargs
+            "Test only for debian based platforms", _use_item_location=True
         )
     try:
         try:
@@ -120,7 +109,7 @@ def system_aptsources(request, grains):
                 raise pytest.skip.Exception(
                     "This test is meant to run without the system aptsources package, but it's "
                     "available from '{}'.".format(sourceslist.__file__),
-                    **exc_kwargs
+                    _use_item_location=True,
                 )
             else:
                 # Run the test
@@ -135,7 +124,7 @@ def system_aptsources(request, grains):
                     "{}".format(*sys.version_info),
                     "{}.{}".format(*sys.version_info),
                 ]
-                session_site_packages_dir = get_path(
+                session_site_packages_dir = sysconfig.get_path(
                     "purelib"
                 )  # note: platlib and purelib could differ
                 session_site_packages_dir = os.path.relpath(
@@ -165,7 +154,8 @@ def system_aptsources(request, grains):
                             shutil.copyfile(src, dst)
                 if not copied_paths:
                     raise pytest.skip.Exception(
-                        "aptsources.sourceslist python module not found", **exc_kwargs
+                        "aptsources.sourceslist python module not found",
+                        _use_item_location=True,
                     )
                 # Run the test
                 yield request.param
@@ -376,7 +366,7 @@ def test_pkgrepo_with_architectures(pkgrepo, grains, sources_list_file, subtests
     )
 
     def _get_arch(arch):
-        return "[arch={}] ".format(arch) if arch else ""
+        return f"[arch={arch}] " if arch else ""
 
     def _run(arch=None, test=False):
         return pkgrepo.managed(
@@ -496,6 +486,11 @@ def test_pkgrepo_with_architectures(pkgrepo, grains, sources_list_file, subtests
         assert ret.result is True
 
 
+@pytest.fixture(scope="module")
+def repo_uri():
+    yield "http://www.deb-multimedia.org"
+
+
 @pytest.fixture
 def trailing_slash_repo_file(grains):
     if grains["os_family"] != "Debian":
@@ -515,19 +510,21 @@ def trailing_slash_repo_file(grains):
 
 
 @pytest.mark.requires_salt_states("pkgrepo.managed", "pkgrepo.absent")
-def test_repo_present_absent_trailing_slash_uri(pkgrepo, trailing_slash_repo_file):
+def test_repo_present_absent_trailing_slash_uri(
+    pkgrepo, repo_uri, trailing_slash_repo_file
+):
     """
-    test adding a repo with a trailing slash in the uri
+    test adding and then removing a repo with a trailing slash in the uri
     """
     # with the trailing slash
-    repo_content = "deb http://www.deb-multimedia.org/ stable main"
+    repo_content = f"deb {repo_uri}/ stable main"
     # initial creation
     ret = pkgrepo.managed(
         name=repo_content, file=trailing_slash_repo_file, refresh=False, clean_file=True
     )
     with salt.utils.files.fopen(trailing_slash_repo_file, "r") as fp:
         file_content = fp.read()
-    assert file_content.strip() == "deb http://www.deb-multimedia.org/ stable main"
+    assert file_content.strip() == f"deb {repo_uri}/ stable main"
     assert ret.changes
     # no changes
     ret = pkgrepo.managed(
@@ -540,19 +537,21 @@ def test_repo_present_absent_trailing_slash_uri(pkgrepo, trailing_slash_repo_fil
 
 
 @pytest.mark.requires_salt_states("pkgrepo.managed", "pkgrepo.absent")
-def test_repo_present_absent_no_trailing_slash_uri(pkgrepo, trailing_slash_repo_file):
+def test_repo_present_absent_no_trailing_slash_uri(
+    pkgrepo, repo_uri, trailing_slash_repo_file
+):
     """
     test adding a repo with a trailing slash in the uri
     """
     # without the trailing slash
-    repo_content = "deb http://www.deb-multimedia.org stable main"
+    repo_content = f"deb {repo_uri} stable main"
     # initial creation
     ret = pkgrepo.managed(
         name=repo_content, file=trailing_slash_repo_file, refresh=False, clean_file=True
     )
     with salt.utils.files.fopen(trailing_slash_repo_file, "r") as fp:
         file_content = fp.read()
-    assert file_content.strip() == "deb http://www.deb-multimedia.org stable main"
+    assert file_content.strip() == repo_content
     assert ret.changes
     # no changes
     ret = pkgrepo.managed(
@@ -566,33 +565,79 @@ def test_repo_present_absent_no_trailing_slash_uri(pkgrepo, trailing_slash_repo_
 
 @pytest.mark.requires_salt_states("pkgrepo.managed", "pkgrepo.absent")
 def test_repo_present_absent_no_trailing_slash_uri_add_slash(
-    pkgrepo, trailing_slash_repo_file
+    pkgrepo, repo_uri, trailing_slash_repo_file
 ):
     """
     test adding a repo without a trailing slash, and then running it
     again with a trailing slash.
     """
     # without the trailing slash
-    repo_content = "deb http://www.deb-multimedia.org stable main"
+    repo_content = f"deb {repo_uri} stable main"
     # initial creation
     ret = pkgrepo.managed(
         name=repo_content, file=trailing_slash_repo_file, refresh=False, clean_file=True
     )
     with salt.utils.files.fopen(trailing_slash_repo_file, "r") as fp:
         file_content = fp.read()
-    assert file_content.strip() == "deb http://www.deb-multimedia.org stable main"
+    assert file_content.strip() == repo_content
     assert ret.changes
     # now add a trailing slash in the name
-    repo_content = "deb http://www.deb-multimedia.org/ stable main"
+    repo_content = f"deb {repo_uri}/ stable main"
     ret = pkgrepo.managed(
         name=repo_content, file=trailing_slash_repo_file, refresh=False
     )
     with salt.utils.files.fopen(trailing_slash_repo_file, "r") as fp:
         file_content = fp.read()
-    assert file_content.strip() == "deb http://www.deb-multimedia.org/ stable main"
+    assert file_content.strip() == repo_content
     # absent
     ret = pkgrepo.absent(name=repo_content)
     assert ret.result
+
+
+@pytest.mark.requires_salt_states("pkgrepo.absent")
+def test_repo_absent_existing_repo_trailing_slash_uri(
+    pkgrepo, repo_uri, subtests, trailing_slash_repo_file
+):
+    """
+    Test pkgrepo.absent with a URI containing a trailing slash
+
+    This test is different from test_repo_present_absent_trailing_slash_uri.
+    That test first does a pkgrepo.managed with a URI containing a trailing
+    slash. Since pkgrepo.managed normalizes the URI by removing the trailing
+    slash, the resulting repo file created by Salt does not contain one. This
+    tests the case where Salt is asked to remove an existing repo with a
+    trailing slash in the repo URI.
+
+    See https://github.com/saltstack/salt/issues/64286
+    """
+    repo_file = pathlib.Path(trailing_slash_repo_file)
+    repo_content = f"deb [arch=amd64] {repo_uri}/ stable main"
+
+    with subtests.test("Remove repo with trailing slash in URI"):
+        # Write contents to file with trailing slash in URI
+        repo_file.write_text(f"{repo_content}\n", encoding="utf-8")
+        # Perform and validate removal
+        ret = pkgrepo.absent(name=repo_content)
+        assert ret.result
+        assert ret.changes
+        assert not repo_file.exists()
+        # A second run of the pkgrepo.absent state should be a no-op (i.e. no changes)
+        ret = pkgrepo.absent(name=repo_content)
+        assert ret.result
+        assert not ret.changes
+        assert not repo_file.exists()
+
+    with subtests.test("URI match with mismatched arch"):
+        # Create a repo file that matches the URI but contains no architecture.
+        # This should not be identified as a match for repo_content, and thus
+        # the result of a state should be a no-op.
+        repo_file.write_text(f"deb {repo_uri} stable main\n", encoding="utf-8")
+        # Since this was a no-op, the state should have succeeded, made no
+        # changes, and left the repo file in place.
+        ret = pkgrepo.absent(name=repo_content)
+        assert ret.result
+        assert not ret.changes
+        assert repo_file.exists()
 
 
 @attr.s(kw_only=True)
@@ -605,6 +650,7 @@ class Repo:
     key_file = attr.ib()
     sources_list_file = attr.ib()
     repo_file = attr.ib()
+    repo_url = attr.ib()
     repo_content = attr.ib()
     key_url = attr.ib()
 
@@ -621,6 +667,10 @@ class Repo:
         if (
             self.grains["osfullname"] == "Ubuntu"
             and self.grains["osrelease"] == "22.04"
+            or "Debian" in self.grains["osfullname"]
+            and self.grains["osrelease"] == "12"
+            # only need to use alt repo until
+            # we release Debian 12 salt packages
         ):
             return True
         return False
@@ -637,6 +687,10 @@ class Repo:
     @repo_file.default
     def _default_repo_file(self):
         return self.sources_list_file
+
+    @repo_url.default
+    def _default_repo_url(self):
+        return f"https://repo.saltproject.io/py3/{self.fullname}/{self.grains['osrelease']}/{self.grains['osarch']}/latest"
 
     @repo_content.default
     def _default_repo_content(self):
@@ -655,24 +709,25 @@ class Repo:
                 opts = "[arch={arch} signed-by=/usr/share/keyrings/salt-archive-keyring.gpg]".format(
                     arch=self.grains["osarch"]
                 )
-            repo_content = "deb {opts} https://repo.saltproject.io/py3/{}/{}/{arch}/latest {} main".format(
-                self.fullname,
-                self.grains["osrelease"],
-                self.grains["oscodename"],
-                arch=self.grains["osarch"],
-                opts=opts,
+            repo_content = (
+                f"deb {opts} {self.repo_url} {self.grains['oscodename']} main"
             )
         return repo_content
 
     @key_url.default
     def _default_key_url(self):
-        key_url = "https://repo.saltproject.io/py3/{}/{}/{}/latest/salt-archive-keyring.gpg".format(
-            self.fullname, self.grains["osrelease"], self.grains["osarch"]
-        )
-
+        key_url = f"{self.repo_url}/salt-archive-keyring.gpg"
         if self.alt_repo:
             key_url = "https://artifacts.elastic.co/GPG-KEY-elasticsearch"
         return key_url
+
+    @property
+    def exists(self):
+        """
+        Return True if the repository path exists.
+        """
+        response = requests.head(self.key_url, timeout=30)
+        return response.status_code == 200
 
 
 @pytest.fixture
@@ -681,10 +736,14 @@ def repo(request, grains, sources_list_file):
     if "signedby" in request.node.name:
         signedby = True
     repo = Repo(grains=grains, sources_list_file=sources_list_file, signedby=signedby)
-    yield repo
-    for key in [repo.key_file, repo.key_file.parent / "salt-alt-key.gpg"]:
-        if key.is_file():
-            key.unlink()
+    if not repo.exists:
+        pytest.skip(f"The repo url '{repo.repo_url}' does not exist")
+    try:
+        yield repo
+    finally:
+        for key in [repo.key_file, repo.key_file.parent / "salt-alt-key.gpg"]:
+            if key.is_file():
+                key.unlink()
 
 
 def test_adding_repo_file_signedby(pkgrepo, states, repo, subtests):
@@ -713,6 +772,38 @@ def test_adding_repo_file_signedby(pkgrepo, states, repo, subtests):
     with subtests.test("test=True"):
         ret = _run(test=True)
         assert ret.changes == {}
+
+
+def test_adding_repo_file_signedby_invalid_name(pkgrepo, states, repo):
+    """
+    Test adding a repo file using pkgrepo.managed
+    and setting signedby and the name is invalid.
+    Ensure we raise an error.
+    """
+
+    default_sources = pathlib.Path("/etc", "apt", "sources.list")
+    with salt.utils.files.fopen(default_sources, "r") as fp:
+        pre_file_content = fp.read()
+
+    ret = states.pkgrepo.managed(
+        name=repo.repo_content.strip("deb"),
+        file=str(repo.repo_file),
+        clean_file=True,
+        signedby=str(repo.key_file),
+        key_url=repo.key_url,
+        aptkey=False,
+        test=False,
+    )
+
+    assert "Failed to configure repo" in ret.comment
+    assert "This must be the complete repo entry" in ret.comment
+    with salt.utils.files.fopen(str(repo.repo_file), "r") as fp:
+        file_content = fp.read()
+        assert not file_content
+
+    with salt.utils.files.fopen(default_sources, "r") as fp:
+        post_file_content = fp.read()
+    assert pre_file_content == post_file_content
 
 
 def test_adding_repo_file_signedby_keyserver(pkgrepo, states, repo):
@@ -788,3 +879,56 @@ def test_adding_repo_file_signedby_alt_file(pkgrepo, states, repo):
         assert file_content.endswith("\n")
     assert key_file.is_file()
     assert repo_content in ret.comment
+
+
+def test_adding_repo_file_signedby_fail_key_keyid(
+    pkgrepo, states, repo, subtests, modules
+):
+    """
+    Test adding a repo file using pkgrepo.managed
+    and setting signedby and keyid when adding the key fails
+    an error is returned
+    """
+
+    def _run(test=False):
+        return states.pkgrepo.managed(
+            name=repo.repo_content,
+            file=str(repo.repo_file),
+            clean_file=True,
+            signedby=str(repo.key_file),
+            keyid="10857FFDD3F91EAE577A21D664CBBC8173D76B3F1",
+            keyserver="keyserver.ubuntu.com",
+            aptkey=False,
+            test=test,
+            keydir="/tmp/test",
+        )
+
+    ret = _run()
+    assert "Failed to configure repo" in ret.comment
+    assert "Could not add key" in ret.comment
+
+
+def test_adding_repo_file_signedby_fail_key_keyurl(
+    pkgrepo, states, repo, subtests, modules
+):
+    """
+    Test adding a repo file using pkgrepo.managed
+    and setting signedby and keyurl when adding the key fails
+    an error is returned
+    """
+
+    def _run(test=False):
+        with patch(
+            "salt.utils.path.which", MagicMock(side_effect=[True, True, False, False])
+        ):
+            return states.pkgrepo.managed(
+                name=repo.repo_content,
+                file=str(repo.repo_file),
+                clean_file=True,
+                key_url="https://repo.saltproject.io/salt/py3/ubuntu/20.04/amd64/latest/SALT-PROJECT-GPG-PUBKEY-2023.pub",
+                aptkey=False,
+            )
+
+    ret = _run()
+    assert "Failed to configure repo" in ret.comment
+    assert "Could not add key" in ret.comment

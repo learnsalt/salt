@@ -1,6 +1,7 @@
 """
 This tests policies that are defined in the giant dictionary in the LGPO module
 """
+
 import pytest
 
 import salt.modules.win_file as win_file
@@ -10,6 +11,7 @@ import salt.utils.win_reg as win_reg
 pytestmark = [
     pytest.mark.windows_whitelisted,
     pytest.mark.skip_unless_on_windows,
+    pytest.mark.slow_test,
 ]
 
 

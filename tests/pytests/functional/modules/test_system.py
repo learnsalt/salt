@@ -1,6 +1,7 @@
 import datetime
 import logging
 import os
+import shutil
 import signal
 import subprocess
 import textwrap
@@ -9,7 +10,10 @@ import pytest
 
 import salt.utils.files
 
-pytestmark = [pytest.mark.skip_unless_on_linux]
+pytestmark = [
+    pytest.mark.skip_unless_on_linux,
+    pytest.mark.slow_test,
+]
 
 log = logging.getLogger(__name__)
 
@@ -103,6 +107,9 @@ def hwclock_has_compare(cmdmod):
     systems where it's not present so that we can skip the
     comparison portion of the test.
     """
+    hwclock = shutil.which("hwclock")
+    if hwclock is None:
+        pytest.skip("The 'hwclock' binary could not be found")
     res = cmdmod.run_all(cmd="hwclock -h")
     _hwclock_has_compare_ = res["retcode"] == 0 and res["stdout"].find("--compare") > 0
     return _hwclock_has_compare_
@@ -125,8 +132,8 @@ def _test_hwclock_sync(system, hwclock_has_compare):
         raise CompareTimeout
 
     for _ in range(2):
+        orig_handler = signal.signal(signal.SIGALRM, _alrm_handler)
         try:
-            orig_handler = signal.signal(signal.SIGALRM, _alrm_handler)
             signal.alarm(3)
             rpipeFd, wpipeFd = os.pipe()
             log.debug("Comparing hwclock to sys clock")
@@ -175,7 +182,7 @@ def test_get_system_date_time(setup_teardown_vars, system, fmt_str):
     t1 = datetime.datetime.now()
     res = system.get_system_date_time()
     t2 = datetime.datetime.strptime(res, fmt_str)
-    msg = "Difference in times is too large. Now: {} Fake: {}".format(t1, t2)
+    msg = f"Difference in times is too large. Now: {t1} Fake: {t2}"
     assert _same_times(t1, t2, seconds_diff=3), msg
 
 
@@ -186,7 +193,7 @@ def test_get_system_date_time_utc(setup_teardown_vars, system, fmt_str):
     t1 = datetime.datetime.utcnow()
     res = system.get_system_date_time("+0000")
     t2 = datetime.datetime.strptime(res, fmt_str)
-    msg = "Difference in times is too large. Now: {} Fake: {}".format(t1, t2)
+    msg = f"Difference in times is too large. Now: {t1} Fake: {t2}"
     assert _same_times(t1, t2, seconds_diff=3), msg
 
 

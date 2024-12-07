@@ -2,14 +2,14 @@ import logging
 import socket
 
 import attr
+import tornado.escape
+import tornado.web
+from tornado import netutil
+from tornado.httpclient import AsyncHTTPClient, HTTPError
+from tornado.httpserver import HTTPServer
+from tornado.ioloop import TimeoutError as IOLoopTimeoutError
 
 import salt.auth
-import salt.ext.tornado.escape
-import salt.ext.tornado.web
-from salt.ext.tornado import netutil
-from salt.ext.tornado.httpclient import AsyncHTTPClient, HTTPError
-from salt.ext.tornado.httpserver import HTTPServer
-from salt.ext.tornado.ioloop import TimeoutError as IOLoopTimeoutError
 from salt.netapi.rest_tornado import saltnado
 
 log = logging.getLogger(__name__)
@@ -30,9 +30,7 @@ class TestsHttpClient:
         if "headers" not in kwargs and self.headers:
             kwargs["headers"] = self.headers.copy()
         try:
-            response = await self.client.fetch(
-                "{}{}".format(self.address, path), **kwargs
-            )
+            response = await self.client.fetch(f"{self.address}{path}", **kwargs)
             return self._decode_body(response)
         except HTTPError as exc:
             exc.response = self._decode_body(exc.response)
@@ -46,7 +44,7 @@ class TestsHttpClient:
             if response.headers.get("Content-Type") == "application/json":
                 response._body = response.body.decode("utf-8")
             else:
-                response._body = salt.ext.tornado.escape.native_str(response.body)
+                response._body = tornado.escape.native_str(response.body)
         return response
 
 
@@ -75,11 +73,11 @@ class TestsTornadoHttpServer:
 
     @address.default
     def _address_default(self):
-        return "{}://127.0.0.1:{}".format(self.protocol, self.port)
+        return f"{self.protocol}://127.0.0.1:{self.port}"
 
     @server.default
     def _server_default(self):
-        server = HTTPServer(self.app, io_loop=self.io_loop, **self.http_server_options)
+        server = HTTPServer(self.app, **self.http_server_options)
         server.add_sockets([self.sock])
         return server
 
@@ -115,7 +113,7 @@ def auth_token(load_auth, auth_creds):
 def build_tornado_app(
     urls, load_auth, client_config, minion_config, setup_event_listener=False
 ):
-    application = salt.ext.tornado.web.Application(urls, debug=True)
+    application = tornado.web.Application(urls, debug=True)
 
     application.auth = load_auth
     application.opts = client_config

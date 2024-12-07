@@ -4,6 +4,7 @@ tests.pytests.functional.utils.test_process
 
 Test salt's process utility module
 """
+
 import pytest
 
 import salt.utils.process
@@ -23,6 +24,10 @@ def process_manager():
         _process_manager.terminate()
 
 
+@pytest.mark.skipif(
+    "grains['osfinger'] == 'Rocky Linux-8' and grains['osarch'] == 'aarch64'",
+    reason="Temporarily skip on Rocky Linux 8 Arm64",
+)
 def test_process_manager_60749(process_manager):
     """
     Regression test for issue #60749

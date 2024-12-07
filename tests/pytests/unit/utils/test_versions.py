@@ -58,9 +58,7 @@ def test_cmp_strict(v1, v2, wanted):
         )
     except InvalidVersion:
         if wanted is not InvalidVersion:
-            raise AssertionError(
-                "cmp({}, {}) shouldn't raise InvalidVersion".format(v1, v2)
-            )
+            raise AssertionError(f"cmp({v1}, {v2}) shouldn't raise InvalidVersion")
 
 
 @pytest.mark.parametrize(
@@ -77,11 +75,13 @@ def test_cmp_strict(v1, v2, wanted):
         # Added by us
         ("3.10.0-514.el7", "3.10.0-514.6.1.el7", 1),
         ("2.2.2", "2.12.1", -1),
+        ("2.24.0", "2.23.0.windows.1", 1),
+        ("2.23.0.windows.2", "2.23.0.windows.1", 1),
     ),
 )
 def test_cmp(v1, v2, wanted):
     res = LooseVersion(v1)._cmp(LooseVersion(v2))
-    assert res == wanted, "cmp({}, {}) should be {}, got {}".format(v1, v2, wanted, res)
+    assert res == wanted, f"cmp({v1}, {v2}) should be {wanted}, got {res}"
 
 
 def test_compare():
@@ -247,7 +247,7 @@ def test_warn_until_warning_raised(subtests):
                 "Deprecation Message until {version}!",
                 _version_info_=(vrs.major - 1, 0),
             )
-            assert "Deprecation Message until {}!".format(vrs.formatted_version) == str(
+            assert f"Deprecation Message until {vrs.formatted_version}!" == str(
                 recorded_warnings[0].message
             )
 

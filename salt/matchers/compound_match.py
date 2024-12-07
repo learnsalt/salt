@@ -22,7 +22,6 @@ def _load_matchers(opts):
     """
     Store matchers in __context__ so they're only loaded once
     """
-    __context__["matchers"] = {}
     __context__["matchers"] = salt.loader.matchers(opts)
 
 
@@ -112,7 +111,7 @@ def match(tgt, opts=None, minion_id=None):
 
             results.append(
                 str(
-                    __context__["matchers"]["{}_match.match".format(engine)](
+                    __context__["matchers"][f"{engine}_match.match"](
                         *engine_args, **engine_kwargs
                     )
                 )

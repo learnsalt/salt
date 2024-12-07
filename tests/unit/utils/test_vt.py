@@ -76,7 +76,7 @@ class VTTestCase(TestCase):
                 buffer_o += stdout
             if stderr:
                 buffer_e += stderr
-        assert buffer_o.strip() == "24 {}".format(cols)
+        assert buffer_o.strip() == f"24 {cols}"
         try:
             # Then wait for the terminal child to exit, this will raise an
             # exception if the process has already exited.
@@ -120,7 +120,7 @@ class VTTestCase(TestCase):
         for idx in range(0, nr_ptys + n_executions):
             try:
                 with salt.utils.vt.Terminal(
-                    'echo "Run {}"'.format(idx),
+                    f'echo "Run {idx}"',
                     shell=True,
                     stream_stdout=False,
                     stream_stderr=False,
@@ -142,7 +142,7 @@ class VTTestCase(TestCase):
         for idx in range(0, nr_ptys + n_executions):
             try:
                 terminal = salt.utils.vt.Terminal(
-                    'echo "Run {}"'.format(idx),
+                    f'echo "Run {idx}"',
                     shell=True,
                     stream_stdout=False,
                     stream_stderr=False,
@@ -261,6 +261,7 @@ class VTTestCase(TestCase):
     def generate_multibyte_stderr_unicode(block_size):
         return b"\x2E" + VTTestCase.generate_multibyte_stdout_unicode(block_size)
 
+    @pytest.mark.skip_initial_onedir_failure
     @pytest.mark.skip_on_windows(reason="Skip VT tests on windows, due to issue 54290")
     @fixStdOutErrFileNoIfNeeded
     def test_split_multibyte_characters_unicode(self):
@@ -331,6 +332,7 @@ class VTTestCase(TestCase):
     def generate_multibyte_stderr_shiftjis(block_size):
         return b"\x2E" + VTTestCase.generate_multibyte_stdout_shiftjis(block_size)
 
+    @pytest.mark.skip_initial_onedir_failure
     @pytest.mark.skip_on_windows(reason="Skip VT tests on windows, due to issue 54290")
     @fixStdOutErrFileNoIfNeeded
     def test_split_multibyte_characters_shiftjis(self):

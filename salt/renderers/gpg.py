@@ -335,7 +335,6 @@ In the Chlorine release, the default behavior will be reversed and an error
 message will be added to ``_errors`` by default.
 """
 
-
 import logging
 import os
 import re
@@ -438,11 +437,6 @@ def _decrypt_ciphertext(cipher):
                     cipher,
                     decrypt_error,
                 )
-            )
-        else:
-            salt.utils.versions.warn_until(
-                "Chlorine",
-                "After the Chlorine release of Salt, gpg_decrypt_must_succeed will default to True.",
             )
         return cipher
     else:

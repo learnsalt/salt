@@ -44,25 +44,21 @@
 #         export DEV_INSTALL_CERT="Developer ID Installer: Salt Stack, Inc. (AB123ABCD1)"
 #
 ################################################################################
+
 #-------------------------------------------------------------------------------
 # Variables
 #-------------------------------------------------------------------------------
-# Get/Set Version
-if [ "$1" == "" ]; then
-    VERSION=$(git describe)
-else
-    VERSION=$1
-fi
-
-# Strip the v from the beginning
-VERSION=${VERSION#"v"}
 
 CPU_ARCH="$(uname -m)"
 SRC_DIR="$(git rev-parse --show-toplevel)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DIST_XML="$SCRIPT_DIR/distribution.xml"
 BUILD_DIR="$SCRIPT_DIR/build"
-PKG_RESOURCES=$SRC_DIR/pkg/osx
-CMD_OUTPUT=$(mktemp -t cmd.log)
+CMD_OUTPUT=$(mktemp -t cmd_log.XXX)
+SCRIPTS_DIR="$SCRIPT_DIR/dist_scripts"
+# Get the python version from the relenv python
+BLD_PY_BIN="$BUILD_DIR/opt/salt/bin/python3"
+PY_VER=$($BLD_PY_BIN -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
 
 #-------------------------------------------------------------------------------
 # Functions
@@ -79,6 +75,7 @@ _usage() {
      echo ""
      echo "  -h, --help      this message"
      echo "  -v, --version   version of Salt display in the package"
+     echo "  -s, --sign   Sign the package"
      echo ""
      echo "  To build the Salt package:"
      echo "      example: $0 3006.1-1"
@@ -112,6 +109,7 @@ _failure() {
 #-------------------------------------------------------------------------------
 # Get Parameters
 #-------------------------------------------------------------------------------
+SIGN=0
 while true; do
     if [[ -z "$1" ]]; then break; fi
     case "$1" in
@@ -119,17 +117,32 @@ while true; do
             _usage
             exit 0
             ;;
-        -*)
+        -s | --sign )
+            SIGN=1
+            shift
+            ;;
+        -v | --version )
+            shift
+            VERSION="$1"
+            shift
+            ;;
+        -* )
             echo "Invalid Option: $1"
             echo ""
             _usage
             exit 1
             ;;
         * )
+            VERSION="$1"
             shift
             ;;
     esac
 done
+
+if [ -z "$VERSION" ]; then
+    VERSION=$(git describe)
+fi
+VERSION=${VERSION#"v"}
 
 #-------------------------------------------------------------------------------
 # Delete temporary files on exit
@@ -152,18 +165,17 @@ printf -- "-%.0s" {1..80}; printf "\n"
 if [[ ! -e "$SRC_DIR/.git" ]] && [[ ! -e "$SRC_DIR/scripts/salt" ]]; then
     echo "This directory doesn't appear to be a git repository."
     echo "The macOS build process needs some files from a Git checkout of Salt."
-    echo "Run this script from the 'pkg/osx' directory of the Git checkout."
+    echo "Run this script from the 'pkg/macos' directory of the Git checkout."
     exit 1
 fi
 
 #-------------------------------------------------------------------------------
 # Add Title, Description, Version and CPU Arch to distribution.xml
 #-------------------------------------------------------------------------------
-DIST="$PKG_RESOURCES/distribution.xml"
-if [ -f "$DIST" ]; then
+if [ -f "$DIST_XML" ]; then
     _msg "Removing existing distribution.xml"
-    rm -f "$DIST"
-    if ! [ -f "$DIST" ]; then
+    rm -f "$DIST_XML"
+    if ! [ -f "$DIST_XML" ]; then
         _success
     else
         _failure
@@ -171,11 +183,11 @@ if [ -f "$DIST" ]; then
 fi
 
 _msg "Creating distribution.xml"
-cp "$PKG_RESOURCES/distribution.xml.dist" "$DIST"
-if [ -f "$DIST" ]; then
+cp "$SCRIPT_DIR/distribution.xml.dist" "$DIST_XML"
+if [ -f "$DIST_XML" ]; then
     _success
 else
-    CMD_OUTPUT="Failed to copy: $DIST"
+    CMD_OUTPUT="Failed to copy: $DIST_XML"
     _failure
 fi
 
@@ -183,8 +195,8 @@ fi
 # be able to check it
 _msg "Setting package version"
 SED_STR="s/@VERSION@/$VERSION/g"
-sed -i "" "$SED_STR" "$DIST"
-if grep -q "$VERSION" "$DIST"; then
+sed -i "" "$SED_STR" "$DIST_XML"
+if grep -q "$VERSION" "$DIST_XML"; then
     _success
 else
     CMD_OUTPUT="Failed to set: $VERSION"
@@ -194,8 +206,8 @@ fi
 _msg "Setting package title"
 TITLE="Salt $VERSION (Python 3)"
 SED_STR="s/@TITLE@/$TITLE/g"
-sed -i "" "$SED_STR" "$DIST"
-if grep -q "$TITLE" "$DIST"; then
+sed -i "" "$SED_STR" "$DIST_XML"
+if grep -q "$TITLE" "$DIST_XML"; then
     _success
 else
     CMD_OUTPUT="Failed to set: $TITLE"
@@ -205,8 +217,8 @@ fi
 _msg "Setting package description"
 DESC="Salt $VERSION with Python 3"
 SED_STR="s/@DESC@/$DESC/g"
-sed -i "" "$SED_STR" "$DIST"
-if grep -q "$DESC" "$DIST"; then
+sed -i "" "$SED_STR" "$DIST_XML"
+if grep -q "$DESC" "$DIST_XML"; then
     _success
 else
     CMD_OUTPUT="Failed to set: $DESC"
@@ -215,11 +227,40 @@ fi
 
 _msg "Setting package architecture"
 SED_STR="s/@CPU_ARCH@/$CPU_ARCH/g"
-sed -i "" "$SED_STR" "$DIST"
-if grep -q "$CPU_ARCH" "$DIST"; then
+sed -i "" "$SED_STR" "$DIST_XML"
+if grep -q "$CPU_ARCH" "$DIST_XML"; then
     _success
 else
     CMD_OUTPUT="Failed to set: $CPU_ARCH"
+    _failure
+fi
+
+if [ -d "$SCRIPTS_DIR" ]; then
+    _msg "Removing existing scripts directory"
+    rm -f "$SCRIPTS_DIR"
+    if ! [ -d "$SCRIPTS_DIR" ]; then
+        _success
+    else
+        _failure
+    fi
+fi
+
+_msg "Creating scripts directory"
+cp -r "$SCRIPT_DIR/pkg-scripts" "$SCRIPTS_DIR"
+if [ -d "$SCRIPTS_DIR" ]; then
+    _success
+else
+    CMD_OUTPUT="Failed to copy: $SCRIPTS_DIR"
+    _failure
+fi
+
+_msg "Setting python version for preinstall"
+SED_STR="s/@PY_VER@/$PY_VER/g"
+sed -i "" "$SED_STR" "$SCRIPTS_DIR/preinstall"
+if grep -q "$PY_VER" "$SCRIPTS_DIR/preinstall"; then
+    _success
+else
+    CMD_OUTPUT="Failed to set: $PY_VER"
     _failure
 fi
 
@@ -229,9 +270,9 @@ fi
 
 _msg "Building the source package"
 # Build the src package
-FILE="salt-src-$VERSION-py3-$CPU_ARCH.pkg"
+FILE="$SCRIPT_DIR/salt-src-$VERSION-py3-$CPU_ARCH.pkg"
 if pkgbuild --root="$BUILD_DIR" \
-            --scripts=pkg-scripts \
+            --scripts="$SCRIPTS_DIR" \
             --identifier=com.saltstack.salt \
             --version="$VERSION" \
             --ownership=recommended \
@@ -242,22 +283,38 @@ else
 fi
 
 
-_msg "Building the product package (signed)"
-FILE="salt-$VERSION-py3-$CPU_ARCH-signed.pkg"
-if productbuild --resources=pkg-resources \
-                --distribution=distribution.xml  \
-                --package-path="salt-src-$VERSION-py3-$CPU_ARCH.pkg" \
-                --version="$VERSION" \
-                --sign "$DEV_INSTALL_CERT" \
-                --timestamp \
-                "$FILE" > "$CMD_OUTPUT" 2>&1; then
-    _success
+PKG_FILE="$SCRIPT_DIR/salt-$VERSION-py3-$CPU_ARCH.pkg"
+if [ "${SIGN}" -eq 1 ]; then
+    _msg "Building the product package (signed)"
+    # This is not a nightly build, so we want to sign it
+    FILE="$SCRIPT_DIR/salt-$VERSION-py3-$CPU_ARCH.pkg"
+    if productbuild --resources="$SCRIPT_DIR/pkg-resources" \
+                    --distribution="$DIST_XML" \
+                    --package-path="$SCRIPT_DIR/salt-src-$VERSION-py3-$CPU_ARCH.pkg" \
+                    --version="$VERSION" \
+                    --sign "$DEV_INSTALL_CERT" \
+                    --timestamp \
+                    "$PKG_FILE" > "$CMD_OUTPUT" 2>&1; then
+        _success
+    else
+        _failure
+    fi
 else
-    _failure
+    _msg "Building the product package (unsigned)"
+    # This is a nightly build, so we don't sign it
+    if productbuild --resources="$SCRIPT_DIR/pkg-resources" \
+                    --distribution="$DIST_XML" \
+                    --package-path="$SCRIPT_DIR/salt-src-$VERSION-py3-$CPU_ARCH.pkg" \
+                    --version="$VERSION" \
+                    "$PKG_FILE" > "$CMD_OUTPUT" 2>&1; then
+        _success
+    else
+        _failure
+    fi
 fi
 
 #-------------------------------------------------------------------------------
-# Script Start
+# Script Completed
 #-------------------------------------------------------------------------------
 printf -- "-%.0s" {1..80}; printf "\n"
 echo "Building Salt Package Completed"

@@ -489,6 +489,7 @@ def _check_skip(grains):
     return False
 
 
+@pytest.mark.timeout_unless_on_windows(120)
 @pytest.mark.skip_initial_gh_actions_failure(skip=_check_skip)
 def test_orchestrate_subset(
     salt_run_cli,
@@ -514,7 +515,7 @@ def test_orchestrate_subset(
     with salt_master.state_tree.base.temp_file(
         "orch/subset.sls", sls_contents
     ), salt_master.state_tree.base.temp_file("test.sls", test_sls):
-        ret = salt_run_cli.run("state.orchestrate", "orch.subset")
+        ret = salt_run_cli.run("state.orchestrate", "orch.subset", _timeout=60)
         assert ret.returncode == 0
 
     for state_data in ret.data["data"][salt_master.id].values():

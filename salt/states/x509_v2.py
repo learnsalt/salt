@@ -82,7 +82,7 @@ the certificate to the mine, where it can be easily retrieved by other minions.
         - keysize: 4096
         - backup: true
         - require:
-          - file: /etc/pki
+          - file: /etc/pki/issued_certs
 
     Create self-signed CA certificate:
       x509.certificate_managed:
@@ -180,15 +180,15 @@ according to the www policy.
         - require:
           - x509: /etc/pki/www.key
 """
+
 import base64
 import copy
-import datetime
 import logging
 import os.path
+from datetime import datetime, timedelta, timezone
 
 import salt.utils.files
 from salt.exceptions import CommandExecutionError, SaltInvocationError
-from salt.features import features
 from salt.state import STATE_INTERNAL_KEYWORDS as _STATE_INTERNAL_KEYWORDS
 
 try:
@@ -211,12 +211,8 @@ __virtualname__ = "x509"
 def __virtual__():
     if not HAS_CRYPTOGRAPHY:
         return (False, "Could not load cryptography")
-    if not features.get("x509_v2"):
-        return (
-            False,
-            "x509_v2 needs to be explicitly enabled by setting `x509_v2: true` "
-            "in the minion configuration value `features` until Salt 3008 (Argon).",
-        )
+    if not __opts__["features"].get("x509_v2", True):
+        return (False, "x509_v2 modules were explicitly disabled in `features:x509_v2`")
     return __virtualname__
 
 
@@ -390,7 +386,7 @@ def certificate_managed(
     if days_valid is None and not_after is None:
         try:
             salt.utils.versions.warn_until(
-                "Potassium",
+                3009,
                 "The default value for `days_valid` will change to 30. Please adapt your code accordingly.",
             )
             days_valid = 365
@@ -400,7 +396,7 @@ def certificate_managed(
     if days_remaining is None:
         try:
             salt.utils.versions.warn_until(
-                "Potassium",
+                3009,
                 "The default value for `days_remaining` will change to 7. Please adapt your code accordingly.",
             )
             days_remaining = 90
@@ -409,7 +405,7 @@ def certificate_managed(
 
     if "algorithm" in kwargs:
         salt.utils.versions.warn_until(
-            "Potassium",
+            3009,
             "`algorithm` has been renamed to `digest`. Please update your code.",
         )
         digest = kwargs.pop("algorithm")
@@ -434,9 +430,9 @@ def certificate_managed(
         file_managed_test = _file_managed(name, test=True, replace=False, **file_args)
         if file_managed_test["result"] is False:
             ret["result"] = False
-            ret[
-                "comment"
-            ] = "Problem while testing file.managed changes, see its output"
+            ret["comment"] = (
+                "Problem while testing file.managed changes, see its output"
+            )
             _add_sub_state_run(ret, file_managed_test)
             return ret
 
@@ -487,11 +483,16 @@ def certificate_managed(
                     else None
                 ):
                     changes["pkcs12_friendlyname"] = pkcs12_friendlyname
+                try:
+                    curr_not_after = current.not_valid_after_utc
+                except AttributeError:
+                    # naive datetime object, release <42 (it's always UTC)
+                    curr_not_after = current.not_valid_after.replace(
+                        tzinfo=timezone.utc
+                    )
 
-                if (
-                    current.not_valid_after
-                    < datetime.datetime.utcnow()
-                    + datetime.timedelta(days=days_remaining)
+                if curr_not_after < datetime.now(tz=timezone.utc) + timedelta(
+                    days=days_remaining
                 ):
                     changes["expiration"] = True
 
@@ -782,7 +783,7 @@ def crl_managed(
     if days_valid is None:
         try:
             salt.utils.versions.warn_until(
-                "Potassium",
+                3009,
                 "The default value for `days_valid` will change to 7. Please adapt your code accordingly.",
             )
             days_valid = 100
@@ -792,7 +793,7 @@ def crl_managed(
     if days_remaining is None:
         try:
             salt.utils.versions.warn_until(
-                "Potassium",
+                3009,
                 "The default value for `days_remaining` will change to 3. Please adapt your code accordingly.",
             )
             days_remaining = 30
@@ -804,14 +805,14 @@ def crl_managed(
         parsed = {}
         if len(rev) == 1 and isinstance(rev[next(iter(rev))], list):
             salt.utils.versions.warn_until(
-                "Potassium",
+                3009,
                 "Revoked certificates should be specified as a simple list of dicts.",
             )
             for val in rev[next(iter(rev))]:
                 parsed.update(val)
         if "reason" in (parsed or rev):
             salt.utils.versions.warn_until(
-                "Potassium",
+                3009,
                 "The `reason` parameter for revoked certificates should be specified in extensions:CRLReason.",
             )
             salt.utils.dictupdate.set_dict_key_value(
@@ -840,9 +841,9 @@ def crl_managed(
 
         if file_managed_test["result"] is False:
             ret["result"] = False
-            ret[
-                "comment"
-            ] = "Problem while testing file.managed changes, see its output"
+            ret["comment"] = (
+                "Problem while testing file.managed changes, see its output"
+            )
             _add_sub_state_run(ret, file_managed_test)
             return ret
 
@@ -896,10 +897,14 @@ def crl_managed(
 
                 if encoding != current_encoding:
                     changes["encoding"] = encoding
+                try:
+                    curr_next_update = current.next_update_utc
+                except AttributeError:
+                    # naive datetime object, release <42 (it's always UTC)
+                    curr_next_update = current.next_update.replace(tzinfo=timezone.utc)
                 if days_remaining and (
-                    current.next_update
-                    < datetime.datetime.utcnow()
-                    + datetime.timedelta(days=days_remaining)
+                    curr_next_update
+                    < datetime.now(tz=timezone.utc) + timedelta(days=days_remaining)
                 ):
                     changes["expiration"] = True
 
@@ -1056,7 +1061,7 @@ def csr_managed(
     # Deprecation checks vs the old x509 module
     if "algorithm" in kwargs:
         salt.utils.versions.warn_until(
-            "Potassium",
+            3009,
             "`algorithm` has been renamed to `digest`. Please update your code.",
         )
         digest = kwargs.pop("algorithm")
@@ -1079,9 +1084,9 @@ def csr_managed(
 
         if file_managed_test["result"] is False:
             ret["result"] = False
-            ret[
-                "comment"
-            ] = "Problem while testing file.managed changes, see its output"
+            ret["comment"] = (
+                "Problem while testing file.managed changes, see its output"
+            )
             _add_sub_state_run(ret, file_managed_test)
             return ret
 
@@ -1274,7 +1279,7 @@ def private_key_managed(
     keysize
         For ``rsa``, specifies the bitlength of the private key (2048, 3072, 4096).
         For ``ec``, specifies the NIST curve to use (256, 384, 521).
-        Irrelevant for Edwards-curve schemes (`ed25519``, ``ed448``).
+        Irrelevant for Edwards-curve schemes (``ed25519``, ``ed448``).
         Defaults to 2048 for RSA and 256 for EC.
 
     passphrase
@@ -1323,7 +1328,7 @@ def private_key_managed(
     # Deprecation checks vs the old x509 module
     if "bits" in kwargs:
         salt.utils.versions.warn_until(
-            "Potassium",
+            3009,
             "`bits` has been renamed to `keysize`. Please update your code.",
         )
         keysize = kwargs.pop("bits")
@@ -1363,9 +1368,9 @@ def private_key_managed(
 
         if file_managed_test["result"] is False:
             ret["result"] = False
-            ret[
-                "comment"
-            ] = "Problem while testing file.managed changes, see its output"
+            ret["comment"] = (
+                "Problem while testing file.managed changes, see its output"
+            )
             _add_sub_state_run(ret, file_managed_test)
             return ret
 
@@ -1450,7 +1455,7 @@ def private_key_managed(
                 and algo in ("rsa", "ec")
                 and current.key_size != check_keysize
             ):
-                changes["keysize"] = keysize
+                changes["keysize"] = check_keysize
             if encoding != current_encoding:
                 changes["encoding"] = encoding
         elif file_exists and new:
@@ -1585,9 +1590,9 @@ def _file_managed(name, test=None, **kwargs):
 def _check_file_ret(fret, ret, current):
     if fret["result"] is False:
         ret["result"] = False
-        ret[
-            "comment"
-        ] = f"Could not {'create' if not current else 'update'} file, see file.managed output"
+        ret["comment"] = (
+            f"Could not {'create' if not current else 'update'} file, see file.managed output"
+        )
         ret["changes"] = {}
         return False
     return True
@@ -1597,10 +1602,12 @@ def _build_cert(
     ca_server=None, signing_policy=None, signing_private_key=None, **kwargs
 ):
     final_kwargs = copy.deepcopy(kwargs)
+    final_kwargs["signing_private_key"] = signing_private_key
     x509util.merge_signing_policy(
         __salt__["x509.get_signing_policy"](signing_policy, ca_server=ca_server),
         final_kwargs,
     )
+    signing_private_key = final_kwargs.pop("signing_private_key")
 
     builder, _, private_key_loaded, signing_cert = x509util.build_crt(
         signing_private_key,

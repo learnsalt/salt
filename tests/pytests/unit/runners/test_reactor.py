@@ -2,7 +2,6 @@
 unit tests for the reactor runner
 """
 
-
 import logging
 
 import pytest
@@ -13,6 +12,10 @@ from salt.utils.event import SaltEvent
 from tests.support.mock import MagicMock, patch
 
 log = logging.getLogger(__name__)
+
+pytestmark = [
+    pytest.mark.usefixtures("mocked_tcp_pub_client"),
+]
 
 
 class MockEvent:
@@ -86,22 +89,24 @@ def test_list():
     }
 
     with patch.dict(reactor.__opts__, mock_opts):
-        with patch.object(SaltEvent, "get_event", return_value=event_returns):
-            with patch("salt.utils.master.get_master_key") as get_master_key:
-                get_master_key.retun_value = MagicMock(retun_value="master_key")
-                ret = reactor.list_()
-                assert {"test_event/*": ["/srv/reactors/reactor.sls"]} in ret
+        with patch.object(SaltEvent, "connect_pub", return_value=True):
+            with patch.object(SaltEvent, "get_event", return_value=event_returns):
+                with patch("salt.utils.master.get_master_key") as get_master_key:
+                    get_master_key.retun_value = MagicMock(retun_value="master_key")
+                    ret = reactor.list_()
+                    assert {"test_event/*": ["/srv/reactors/reactor.sls"]} in ret
 
     event_returns = {
         "_stamp": "2020-09-04T16:51:52.577711",
     }
 
     with patch.dict(reactor.__opts__, mock_opts):
-        with patch.object(SaltEvent, "get_event", return_value=event_returns):
-            with patch("salt.utils.master.get_master_key") as get_master_key:
-                get_master_key.retun_value = MagicMock(retun_value="master_key")
-                ret = reactor.list_()
-                assert ret is None
+        with patch.object(SaltEvent, "connect_pub", return_value=True):
+            with patch.object(SaltEvent, "get_event", return_value=event_returns):
+                with patch("salt.utils.master.get_master_key") as get_master_key:
+                    get_master_key.retun_value = MagicMock(retun_value="master_key")
+                    ret = reactor.list_()
+                    assert ret is None
 
     mock_opts = {}
     mock_opts["reactor"] = [{"test_event/*": ["/srv/reactors/reactor.sls"]}]
@@ -112,11 +117,12 @@ def test_list():
                 "_stamp": "2020-09-04T16:51:52.577711",
             }
 
-        with patch.object(SaltEvent, "get_event", return_value=event_returns):
-            with patch("salt.utils.master.get_master_key") as get_master_key:
-                get_master_key.retun_value = MagicMock(retun_value="master_key")
-                ret = reactor.list_()
-                assert {"test_event/*": ["/srv/reactors/reactor.sls"]} in ret
+        with patch.object(SaltEvent, "connect_pub", return_value=True):
+            with patch.object(SaltEvent, "get_event", return_value=event_returns):
+                with patch("salt.utils.master.get_master_key") as get_master_key:
+                    get_master_key.retun_value = MagicMock(retun_value="master_key")
+                    ret = reactor.list_()
+                    assert {"test_event/*": ["/srv/reactors/reactor.sls"]} in ret
 
 
 def test_add():
@@ -132,11 +138,12 @@ def test_add():
     mock_opts = {}
     mock_opts = {"engines": []}
     with patch.dict(reactor.__opts__, mock_opts):
-        with pytest.raises(CommandExecutionError) as excinfo:
-            ret = reactor.add(
-                "salt/cloud/*/destroyed", reactors="/srv/reactor/destroy/*.sls"
-            )
-        assert excinfo.value.error == "Reactor system is not running."
+        with patch.object(SaltEvent, "connect_pub", return_value=True):
+            with pytest.raises(CommandExecutionError) as excinfo:
+                ret = reactor.add(
+                    "salt/cloud/*/destroyed", reactors="/srv/reactor/destroy/*.sls"
+                )
+            assert excinfo.value.error == "Reactor system is not running."
 
     mock_opts = {}
     mock_opts["engines"] = [
@@ -156,13 +163,14 @@ def test_add():
     }
 
     with patch.dict(reactor.__opts__, mock_opts):
-        with patch.object(SaltEvent, "get_event", return_value=event_returns):
-            with patch("salt.utils.master.get_master_key") as get_master_key:
-                get_master_key.retun_value = MagicMock(retun_value="master_key")
-                ret = reactor.add("test_event/*", "/srv/reactor/reactor.sls")
-                assert "status" in ret
-                assert ret["status"]
-                assert "Reactor added." == ret["comment"]
+        with patch.object(SaltEvent, "connect_pub", return_value=True):
+            with patch.object(SaltEvent, "get_event", return_value=event_returns):
+                with patch("salt.utils.master.get_master_key") as get_master_key:
+                    get_master_key.retun_value = MagicMock(retun_value="master_key")
+                    ret = reactor.add("test_event/*", "/srv/reactor/reactor.sls")
+                    assert "status" in ret
+                    assert ret["status"]
+                    assert "Reactor added." == ret["comment"]
 
     event_returns = {
         "reactors": [{"test_event/*": ["/srv/reactors/reactor.sls"]}],
@@ -170,11 +178,12 @@ def test_add():
     }
 
     with patch.dict(reactor.__opts__, mock_opts):
-        with patch.object(SaltEvent, "get_event", return_value=event_returns):
-            with patch("salt.utils.master.get_master_key") as get_master_key:
-                get_master_key.retun_value = MagicMock(retun_value="master_key")
-                ret = reactor.add("test_event/*", "/srv/reactor/reactor.sls")
-                assert ret is None
+        with patch.object(SaltEvent, "connect_pub", return_value=True):
+            with patch.object(SaltEvent, "get_event", return_value=event_returns):
+                with patch("salt.utils.master.get_master_key") as get_master_key:
+                    get_master_key.retun_value = MagicMock(retun_value="master_key")
+                    ret = reactor.add("test_event/*", "/srv/reactor/reactor.sls")
+                    assert ret is None
 
 
 def test_delete():
@@ -210,13 +219,14 @@ def test_delete():
     }
 
     with patch.dict(reactor.__opts__, mock_opts):
-        with patch.object(SaltEvent, "get_event", return_value=event_returns):
-            with patch("salt.utils.master.get_master_key") as get_master_key:
-                get_master_key.retun_value = MagicMock(retun_value="master_key")
-                ret = reactor.delete("test_event/*")
-                assert "status" in ret
-                assert ret["status"]
-                assert "Reactor deleted." == ret["comment"]
+        with patch.object(SaltEvent, "connect_pub", return_value=True):
+            with patch.object(SaltEvent, "get_event", return_value=event_returns):
+                with patch("salt.utils.master.get_master_key") as get_master_key:
+                    get_master_key.retun_value = MagicMock(retun_value="master_key")
+                    ret = reactor.delete("test_event/*")
+                    assert "status" in ret
+                    assert ret["status"]
+                    assert "Reactor deleted." == ret["comment"]
 
     event_returns = {
         "reactors": [{"bot/*": ["/srv/reactors/bot.sls"]}],
@@ -224,11 +234,12 @@ def test_delete():
     }
 
     with patch.dict(reactor.__opts__, mock_opts):
-        with patch.object(SaltEvent, "get_event", return_value=event_returns):
-            with patch("salt.utils.master.get_master_key") as get_master_key:
-                get_master_key.retun_value = MagicMock(retun_value="master_key")
-                ret = reactor.delete("test_event/*")
-                assert ret is None
+        with patch.object(SaltEvent, "connect_pub", return_value=True):
+            with patch.object(SaltEvent, "get_event", return_value=event_returns):
+                with patch("salt.utils.master.get_master_key") as get_master_key:
+                    get_master_key.retun_value = MagicMock(retun_value="master_key")
+                    ret = reactor.delete("test_event/*")
+                    assert ret is None
 
 
 def test_is_leader():
@@ -260,11 +271,12 @@ def test_is_leader():
     event_returns = {"result": True, "_stamp": "2020-09-04T18:32:10.004490"}
 
     with patch.dict(reactor.__opts__, mock_opts):
-        with patch.object(SaltEvent, "get_event", return_value=event_returns):
-            with patch("salt.utils.master.get_master_key") as get_master_key:
-                get_master_key.retun_value = MagicMock(retun_value="master_key")
-                ret = reactor.is_leader()
-                assert ret
+        with patch.object(SaltEvent, "connect_pub", return_value=True):
+            with patch.object(SaltEvent, "get_event", return_value=event_returns):
+                with patch("salt.utils.master.get_master_key") as get_master_key:
+                    get_master_key.retun_value = MagicMock(retun_value="master_key")
+                    ret = reactor.is_leader()
+                    assert ret
 
 
 def test_set_leader():
@@ -296,8 +308,9 @@ def test_set_leader():
     event_returns = {"result": True, "_stamp": "2020-09-04T18:32:10.004490"}
 
     with patch.dict(reactor.__opts__, mock_opts):
-        with patch.object(SaltEvent, "get_event", return_value=event_returns):
-            with patch("salt.utils.master.get_master_key") as get_master_key:
-                get_master_key.retun_value = MagicMock(retun_value="master_key")
-                ret = reactor.set_leader()
-                assert ret
+        with patch.object(SaltEvent, "connect_pub", return_value=True):
+            with patch.object(SaltEvent, "get_event", return_value=event_returns):
+                with patch("salt.utils.master.get_master_key") as get_master_key:
+                    get_master_key.retun_value = MagicMock(retun_value="master_key")
+                    ret = reactor.set_leader()
+                    assert ret

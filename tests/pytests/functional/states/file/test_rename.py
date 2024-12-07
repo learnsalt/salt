@@ -1,6 +1,7 @@
 """
 Tests for file.rename state function
 """
+
 # nox -e pytest-zeromq-3.8(coverage=False) -- -vvv --run-slow --run-destructive tests\pytests\functional\states\file\test_rename.py
 
 import pytest
@@ -9,6 +10,7 @@ import salt.utils.path
 
 pytestmark = [
     pytest.mark.windows_whitelisted,
+    pytest.mark.slow_test,
 ]
 
 

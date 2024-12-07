@@ -4,7 +4,6 @@
     Test cases for salt.modules.locate
 """
 
-
 import pytest
 
 import salt.modules.locate as locate
@@ -44,9 +43,9 @@ def test_stats():
     }
 
     mock_ret = """Database /var/lib/mlocate/mlocate.db:
-    49,252 directories 
-    75,253 files 
-    93,214 bytes in file names 
+    49,252 directories
+    75,253 files
+    93,214 bytes in file names
     29,165 bytes used to store database"""
 
     with patch.dict(locate.__salt__, {"cmd.run": MagicMock(return_value=mock_ret)}):

@@ -11,6 +11,7 @@ import pytest
 from saltfactories.utils import random_string
 
 import salt.utils.x509 as x509util
+from tests.conftest import FIPS_TESTRUN
 
 try:
     import cryptography
@@ -33,6 +34,7 @@ log = logging.getLogger(__name__)
 
 pytestmark = [
     pytest.mark.slow_test,
+    pytest.mark.timeout_unless_on_windows(120),
     pytest.mark.skipif(HAS_LIBS is False, reason="Needs cryptography library"),
 ]
 
@@ -44,6 +46,65 @@ def x509_pkidir(tmp_path_factory):
         yield _x509_pkidir
     finally:
         shutil.rmtree(str(_x509_pkidir), ignore_errors=True)
+
+
+@pytest.fixture(params=[{}])
+def existing_privkey(x509_salt_call_cli, request, tmp_path):
+    pk_file = tmp_path / "priv.key"
+    pk_args = {"name": str(pk_file)}
+    pk_args.update(request.param)
+    ret = x509_salt_call_cli.run("state.single", "x509.private_key_managed", **pk_args)
+    assert ret.returncode == 0
+    assert pk_file.exists()
+    yield pk_args["name"]
+
+
+def test_file_managed_does_not_run_in_test_mode_after_x509_v2_invocation_without_changes(
+    x509_salt_master, x509_salt_call_cli, tmp_path, existing_privkey
+):
+    """
+    The x509_v2 state module tries to workaround issue #62590 (Test mode does
+    not propagate to __states__ when using prereq) by invoking the ``state.single``
+    execution module with an explicit test parameter. In some cases, this seems
+    to trigger another bug: The file module always runs in test mode afterwards.
+    This seems to be the case when the x509_v2 state module does not report changes
+    after having been invoked at least once before, until another x509_v2 call results
+    in a ``file.managed`` call without test mode.
+    Issue #64195.
+    """
+    new_privkey = tmp_path / "new_privkey"
+    new_file = tmp_path / "new_file"
+    assert not new_file.exists()
+    state = f"""
+    # The result of this call is irrelevant, just that it exists
+    Some private key is present:
+      x509.private_key_managed:
+        - name: {new_privkey}
+    # This single call without changes does not trigger the bug on its own
+    Another private key is (already) present:
+      x509.private_key_managed:
+        - name: {existing_privkey}
+    Subsequent file.managed call should not run in test mode:
+      file.managed:
+        - name: {new_file}
+        - contents: foo
+        - require:
+          - Another private key is (already) present
+    """
+    with x509_salt_master.state_tree.base.temp_file("file_managed_test.sls", state):
+        ret = x509_salt_call_cli.run("state.apply", "file_managed_test")
+        assert ret.returncode == 0
+        assert ret.data
+        x509_res = next(ret.data[x] for x in ret.data if x.startswith("x509_|-Another"))
+        assert x509_res["result"] is True
+        assert not x509_res["changes"]
+        file_res = next(
+            ret.data[x] for x in ret.data if x.startswith("file_|-Subsequent")
+        )
+        assert file_res["result"] is True
+        assert file_res["changes"]
+        assert new_file.exists()
+        assert new_file.read_text() == "foo\n"
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -63,8 +124,14 @@ def x509_data(
 
 @pytest.fixture(scope="module")
 def x509_salt_master(salt_factories, ca_minion_id, x509_master_config):
+    config_overrides = {
+        "fips_mode": FIPS_TESTRUN,
+        "publish_signing_algorithm": (
+            "PKCS1v15-SHA224" if FIPS_TESTRUN else "PKCS1v15-SHA1"
+        ),
+    }
     factory = salt_factories.salt_master_daemon(
-        "x509-master", defaults=x509_master_config
+        "x509-master", defaults=x509_master_config, overrides=config_overrides
     )
     with factory.started():
         yield factory
@@ -115,18 +182,21 @@ def ca_minion_config(x509_minion_id, ca_cert, ca_key_enc, rsa_privkey, ca_new_ce
                 "subjectKeyIdentifier": "hash",
             },
         },
-        "features": {
-            "x509_v2": True,
-        },
     }
 
 
 @pytest.fixture(scope="module", autouse=True)
 def x509ca_salt_minion(x509_salt_master, ca_minion_id, ca_minion_config):
     assert x509_salt_master.is_running()
+    config_overrides = {
+        "fips_mode": FIPS_TESTRUN,
+        "encryption_algorithm": "OAEP-SHA224" if FIPS_TESTRUN else "OAEP-SHA1",
+        "signing_algorithm": "PKCS1v15-SHA224" if FIPS_TESTRUN else "PKCS1v15-SHA1",
+    }
     factory = x509_salt_master.salt_minion_daemon(
         ca_minion_id,
         defaults=ca_minion_config,
+        overrides=config_overrides,
     )
     with factory.started():
         # Sync All
@@ -139,13 +209,18 @@ def x509ca_salt_minion(x509_salt_master, ca_minion_id, ca_minion_config):
 @pytest.fixture(scope="module")
 def x509_salt_minion(x509_salt_master, x509_minion_id):
     assert x509_salt_master.is_running()
+    config_overrides = {
+        "fips_mode": FIPS_TESTRUN,
+        "encryption_algorithm": "OAEP-SHA224" if FIPS_TESTRUN else "OAEP-SHA1",
+        "signing_algorithm": "PKCS1v15-SHA224" if FIPS_TESTRUN else "PKCS1v15-SHA1",
+    }
     factory = x509_salt_master.salt_minion_daemon(
         x509_minion_id,
         defaults={
             "open_mode": True,
-            "features": {"x509_v2": True},
             "grains": {"testgrain": "foo"},
         },
+        overrides=config_overrides,
     )
     with factory.started():
         # Sync All
@@ -163,8 +238,10 @@ def x509_master_config(ca_minion_id):
             ".*": [
                 "x509.sign_remote_certificate",
             ],
+        },
+        "peer_run": {
             ca_minion_id: [
-                "match.compound",
+                "match.compound_matches",
             ],
         },
     }
@@ -607,6 +684,7 @@ def test_privkey_new_with_prereq(x509_salt_call_cli, tmp_path):
     assert not _belongs_to(cert_new, pk_cur)
 
 
+@pytest.mark.skip_on_fips_enabled_platform
 @pytest.mark.usefixtures("privkey_new_pkcs12")
 @pytest.mark.skipif(
     CRYPTOGRAPHY_VERSION[0] < 36,

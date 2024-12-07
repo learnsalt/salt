@@ -145,7 +145,7 @@ def _snapper_pre(opts, jid):
             snapper_pre = __salt__["snapper.create_snapshot"](
                 config=__opts__.get("snapper_states_config", "root"),
                 snapshot_type="pre",
-                description="Salt State run for jid {}".format(jid),
+                description=f"Salt State run for jid {jid}",
                 __pub_jid=jid,
             )
     except Exception:  # pylint: disable=broad-except
@@ -164,7 +164,7 @@ def _snapper_post(opts, jid, pre_num):
                 config=__opts__.get("snapper_states_config", "root"),
                 snapshot_type="post",
                 pre_number=pre_num,
-                description="Salt State run for jid {}".format(jid),
+                description=f"Salt State run for jid {jid}",
                 __pub_jid=jid,
             )
     except Exception:  # pylint: disable=broad-except
@@ -587,7 +587,7 @@ def template(tem, queue=None, **kwargs):
             raise CommandExecutionError("Pillar failed to render", info=errors)
 
         if not tem.endswith(".sls"):
-            tem = "{sls}.sls".format(sls=tem)
+            tem = f"{tem}.sls"
         high_state, errors = st_.render_state(
             tem, kwargs.get("saltenv", ""), "", None, local=True
         )
@@ -637,7 +637,8 @@ def apply_(mods=None, **kwargs):
 
     .. rubric:: APPLYING ALL STATES CONFIGURED IN TOP.SLS (A.K.A. :ref:`HIGHSTATE <running-highstate>`)
 
-    To apply all configured states, simply run ``state.apply``:
+    To apply all configured states, simply run ``state.apply`` with no SLS
+    targets, like so:
 
     .. code-block:: bash
 
@@ -704,6 +705,12 @@ def apply_(mods=None, **kwargs):
         .. code-block:: bash
 
             salt '*' state.apply localconfig=/path/to/minion.yml
+
+    state_events
+        The state_events option sends progress events as each function in
+        a state run completes execution.
+
+        .. versionadded:: 3006.0
 
 
     .. rubric:: APPLYING INDIVIDUAL SLS FILES (A.K.A. :py:func:`STATE.SLS <salt.modules.state.sls>`)
@@ -816,6 +823,12 @@ def apply_(mods=None, **kwargs):
             module types.
 
         .. versionadded:: 2017.7.8,2018.3.3,2019.2.0
+
+    state_events
+        The state_events option sends progress events as each function in
+        a state run completes execution.
+
+        .. versionadded:: 3006.0
     """
     if mods:
         return sls(mods, **kwargs)
@@ -870,7 +883,7 @@ def request(mods=None, **kwargs):
         try:
             if salt.utils.platform.is_windows():
                 # Make sure cache file isn't read-only
-                __salt__["cmd.run"]('attrib -R "{}"'.format(notify_path))
+                __salt__["cmd.run"](f'attrib -R "{notify_path}"')
             with salt.utils.files.fopen(notify_path, "w+b") as fp_:
                 salt.payload.dump(req, fp_)
         except OSError:
@@ -932,7 +945,7 @@ def clear_request(name=None):
             try:
                 if salt.utils.platform.is_windows():
                     # Make sure cache file isn't read-only
-                    __salt__["cmd.run"]('attrib -R "{}"'.format(notify_path))
+                    __salt__["cmd.run"](f'attrib -R "{notify_path}"')
                 with salt.utils.files.fopen(notify_path, "w+b") as fp_:
                     salt.payload.dump(req, fp_)
             except OSError:
@@ -974,7 +987,7 @@ def run_request(name="default", **kwargs):
     return {}
 
 
-def highstate(test=None, queue=None, **kwargs):
+def highstate(test=None, queue=None, state_events=None, **kwargs):
     """
     Retrieve the state data from the salt master for this minion and execute it
 
@@ -1072,6 +1085,12 @@ def highstate(test=None, queue=None, **kwargs):
 
         .. versionadded:: 2015.8.4
 
+    state_events
+        The state_events option sends progress events as each function in
+        a state run completes execution.
+
+        .. versionadded:: 3006.0
+
     CLI Examples:
 
     .. code-block:: bash
@@ -1127,6 +1146,9 @@ def highstate(test=None, queue=None, **kwargs):
             "Pillar data must be formatted as a dictionary, unless pillar_enc "
             "is specified."
         )
+
+    if state_events is not None:
+        opts["state_events"] = state_events
 
     try:
         st_ = salt.state.HighState(
@@ -1186,7 +1208,15 @@ def highstate(test=None, queue=None, **kwargs):
         return ret
 
 
-def sls(mods, test=None, exclude=None, queue=None, sync_mods=None, **kwargs):
+def sls(
+    mods,
+    test=None,
+    exclude=None,
+    queue=None,
+    sync_mods=None,
+    state_events=None,
+    **kwargs,
+):
     """
     Execute the states in one or more SLS files
 
@@ -1296,6 +1326,12 @@ def sls(mods, test=None, exclude=None, queue=None, sync_mods=None, **kwargs):
 
         .. versionadded:: 2017.7.8,2018.3.3,2019.2.0
 
+    state_events
+        The state_events option sends progress events as each function in
+        a state run completes execution.
+
+        .. versionadded:: 3006.0
+
     CLI Example:
 
     .. code-block:: bash
@@ -1378,9 +1414,12 @@ def sls(mods, test=None, exclude=None, queue=None, sync_mods=None, **kwargs):
 
     for module_type in sync_mods:
         try:
-            __salt__["saltutil.sync_{}".format(module_type)](saltenv=opts["saltenv"])
+            __salt__[f"saltutil.sync_{module_type}"](saltenv=opts["saltenv"])
         except KeyError:
             log.warning("Invalid custom module type '%s', ignoring", module_type)
+
+    if state_events is not None:
+        opts["state_events"] = state_events
 
     try:
         st_ = salt.state.HighState(
@@ -1758,14 +1797,18 @@ def show_states(queue=None, **kwargs):
                 if not isinstance(s, dict):
                     _set_retcode(result)
                     return result
-                states[s["__sls__"]] = True
+                # The isinstance check ensures s is a dict,
+                # so disable the error pylint incorrectly gives:
+                #   [E1126(invalid-sequence-index), show_states]
+                #   Sequence index is not an int, slice, or instance with __index__
+                states[s["__sls__"]] = True  # pylint: disable=E1126
         finally:
             st_.pop_active()
 
         return list(states.keys())
 
 
-def sls_id(id_, mods, test=None, queue=None, **kwargs):
+def sls_id(id_, mods, test=None, queue=None, state_events=None, **kwargs):
     """
     Call a single ID from the named module(s) and handle all requisites
 
@@ -1835,6 +1878,9 @@ def sls_id(id_, mods, test=None, queue=None, **kwargs):
             "is specified."
         )
 
+    if state_events is not None:
+        opts["state_events"] = state_events
+
     try:
         st_ = salt.state.HighState(
             opts,
@@ -1873,7 +1919,10 @@ def sls_id(id_, mods, test=None, queue=None, **kwargs):
         if errors:
             __context__["retcode"] = salt.defaults.exitcodes.EX_STATE_COMPILER_ERROR
             return errors
-        chunks = st_.state.compile_high_data(high_)
+        chunks, errors = st_.state.compile_high_data(high_)
+        if errors:
+            __context__["retcode"] = salt.defaults.exitcodes.EX_STATE_COMPILER_ERROR
+            return errors
         ret = {}
         for chunk in chunks:
             if chunk.get("__id__", "") == id_:
@@ -1981,7 +2030,10 @@ def show_low_sls(mods, test=None, queue=None, **kwargs):
         if errors:
             __context__["retcode"] = salt.defaults.exitcodes.EX_STATE_COMPILER_ERROR
             return errors
-        ret = st_.state.compile_high_data(high_)
+        ret, errors = st_.state.compile_high_data(high_)
+        if errors:
+            __context__["retcode"] = salt.defaults.exitcodes.EX_STATE_COMPILER_ERROR
+            return errors
         # Work around Windows multiprocessing bug, set __opts__['test'] back to
         # value from before this function was run.
         __opts__["test"] = orig_test
@@ -2084,7 +2136,7 @@ def show_sls(mods, test=None, queue=None, **kwargs):
 
 def sls_exists(mods, test=None, queue=None, **kwargs):
     """
-    Tests for the existence the of a specific SLS or list of SLS files on the
+    Tests for the existence of a specific SLS or list of SLS files on the
     master. Similar to :py:func:`state.show_sls <salt.modules.state.show_sls>`,
     rather than returning state details, returns True or False. The default
     environment is ``base``, use ``saltenv`` to specify a different environment.
@@ -2298,12 +2350,12 @@ def pkg(pkg_path, pkg_sum, hash_type, test=None, **kwargs):
     members = s_pkg.getmembers()
     for member in members:
         if salt.utils.stringutils.to_unicode(member.path).startswith(
-            (os.sep, "..{}".format(os.sep))
+            (os.sep, f"..{os.sep}")
         ):
             return {}
-        elif "..{}".format(os.sep) in salt.utils.stringutils.to_unicode(member.path):
+        elif f"..{os.sep}" in salt.utils.stringutils.to_unicode(member.path):
             return {}
-    s_pkg.extractall(root)
+    s_pkg.extractall(root)  # nosec
     s_pkg.close()
     lowstate_json = os.path.join(root, "lowstate.json")
     with salt.utils.files.fopen(lowstate_json, "r") as fp_:
@@ -2336,15 +2388,19 @@ def pkg(pkg_path, pkg_sum, hash_type, test=None, **kwargs):
             continue
         popts["file_roots"][fn_] = [full]
     st_ = salt.state.State(popts, pillar_override=pillar_override)
-    snapper_pre = _snapper_pre(popts, kwargs.get("__pub_jid", "called localy"))
-    ret = st_.call_chunks(lowstate)
-    ret = st_.call_listen(lowstate, ret)
+    snapper_pre = _snapper_pre(popts, kwargs.get("__pub_jid", "called locally"))
+    chunks, errors = st_.order_chunks(lowstate)
+    if errors:
+        ret = errors
+    else:
+        ret = st_.call_chunks(chunks)
+        ret = st_.call_listen(chunks, ret)
     try:
         shutil.rmtree(root)
     except OSError:
         pass
     _set_retcode(ret)
-    _snapper_post(popts, kwargs.get("__pub_jid", "called localy"), snapper_pre)
+    _snapper_post(popts, kwargs.get("__pub_jid", "called locally"), snapper_pre)
     return ret
 
 
@@ -2379,9 +2435,9 @@ def disable(states):
     _changed = False
     for _state in states:
         if _state in _disabled_state_runs:
-            msg.append("Info: {} state already disabled.".format(_state))
+            msg.append(f"Info: {_state} state already disabled.")
         else:
-            msg.append("Info: {} state disabled.".format(_state))
+            msg.append(f"Info: {_state} state disabled.")
             _disabled_state_runs.append(_state)
             _changed = True
 
@@ -2429,9 +2485,9 @@ def enable(states):
     for _state in states:
         log.debug("_state %s", _state)
         if _state not in _disabled_state_runs:
-            msg.append("Info: {} state already enabled.".format(_state))
+            msg.append(f"Info: {_state} state already enabled.")
         else:
-            msg.append("Info: {} state enabled.".format(_state))
+            msg.append(f"Info: {_state} state enabled.")
             _disabled_state_runs.remove(_state)
             _changed = True
 

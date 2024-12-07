@@ -6,6 +6,7 @@ from . import normalize_ret
 
 pytestmark = [
     pytest.mark.windows_whitelisted,
+    pytest.mark.core_test,
 ]
 
 
@@ -60,9 +61,9 @@ def test_requisites_full_sls_require(state, state_tree):
 
 def test_requisites_require_no_state_module(state, state_tree):
     """
-    Call sls file containing several require_in and require.
+    Call sls file containing several require_in and require with a missing req.
 
-    Ensure that some of them are failing and that the order is right.
+    Ensure an error is given.
     """
     sls_contents = """
     # Complex require/require_in graph
@@ -110,135 +111,42 @@ def test_requisites_require_no_state_module(state, state_tree):
         - require_in:
           - A
 
-    # will fail with "The following requisites were not found"
+    # will fail with "Referenced state does not exist for requisite"
     G:
       cmd.run:
         - name: echo G
         - require:
           - Z
-    # will fail with "The following requisites were not found"
+    # will fail with "Referenced state does not exist for requisite"
     H:
       cmd.run:
         - name: echo H
         - require:
           - Z
     """
-    expected_result = {
-        "cmd_|-A_|-echo A fifth_|-run": {
-            "__run_num__": 4,
-            "comment": 'Command "echo A fifth" run',
-            "result": True,
-            "changes": True,
-        },
-        "cmd_|-B_|-echo B second_|-run": {
-            "__run_num__": 1,
-            "comment": 'Command "echo B second" run',
-            "result": True,
-            "changes": True,
-        },
-        "cmd_|-C_|-echo C third_|-run": {
-            "__run_num__": 2,
-            "comment": 'Command "echo C third" run',
-            "result": True,
-            "changes": True,
-        },
-        "cmd_|-D_|-echo D first_|-run": {
-            "__run_num__": 0,
-            "comment": 'Command "echo D first" run',
-            "result": True,
-            "changes": True,
-        },
-        "cmd_|-E_|-echo E fourth_|-run": {
-            "__run_num__": 3,
-            "comment": 'Command "echo E fourth" run',
-            "result": True,
-            "changes": True,
-        },
-        "cmd_|-G_|-echo G_|-run": {
-            "__run_num__": 5,
-            "comment": "The following requisites were not found:\n"
-            + "                   require:\n"
-            + "                       id: Z\n",
-            "result": False,
-            "changes": False,
-        },
-        "cmd_|-H_|-echo H_|-run": {
-            "__run_num__": 6,
-            "comment": "The following requisites were not found:\n"
-            + "                   require:\n"
-            + "                       id: Z\n",
-            "result": False,
-            "changes": False,
-        },
-    }
+    errmsgs = [
+        (
+            "Referenced state does not exist for requisite [require: (id: Z)]"
+            " in state [echo G] in SLS [requisite]"
+        ),
+        (
+            "Referenced state does not exist for requisite [require: (id: Z)]"
+            " in state [echo H] in SLS [requisite]"
+        ),
+    ]
+
     with pytest.helpers.temp_file("requisite.sls", sls_contents, state_tree):
         ret = state.sls("requisite")
-        result = normalize_ret(ret.raw)
-        assert result == expected_result
+        assert ret.failed
+        assert ret.errors == errmsgs
 
 
 def test_requisites_require_ordering_and_errors_1(state, state_tree):
     """
     Call sls file containing several require_in and require.
 
-    Ensure that some of them are failing and that the order is right.
+    Ensure there are errors due to requisites.
     """
-    expected_result = {
-        "cmd_|-A_|-echo A fifth_|-run": {
-            "__run_num__": 4,
-            "comment": 'Command "echo A fifth" run',
-            "result": True,
-            "changes": True,
-        },
-        "cmd_|-B_|-echo B second_|-run": {
-            "__run_num__": 1,
-            "comment": 'Command "echo B second" run',
-            "result": True,
-            "changes": True,
-        },
-        "cmd_|-C_|-echo C third_|-run": {
-            "__run_num__": 2,
-            "comment": 'Command "echo C third" run',
-            "result": True,
-            "changes": True,
-        },
-        "cmd_|-D_|-echo D first_|-run": {
-            "__run_num__": 0,
-            "comment": 'Command "echo D first" run',
-            "result": True,
-            "changes": True,
-        },
-        "cmd_|-E_|-echo E fourth_|-run": {
-            "__run_num__": 3,
-            "comment": 'Command "echo E fourth" run',
-            "result": True,
-            "changes": True,
-        },
-        "cmd_|-F_|-echo F_|-run": {
-            "__run_num__": 5,
-            "comment": "The following requisites were not found:\n"
-            + "                   require:\n"
-            + "                       foobar: A\n",
-            "result": False,
-            "changes": False,
-        },
-        "cmd_|-G_|-echo G_|-run": {
-            "__run_num__": 6,
-            "comment": "The following requisites were not found:\n"
-            + "                   require:\n"
-            + "                       cmd: Z\n",
-            "result": False,
-            "changes": False,
-        },
-        "cmd_|-H_|-echo H_|-run": {
-            "__run_num__": 7,
-            "comment": "The following requisites were not found:\n"
-            + "                   require:\n"
-            + "                       cmd: Z\n",
-            "result": False,
-            "changes": False,
-        },
-    }
     sls_contents = """
     # Complex require/require_in graph
     #
@@ -285,29 +193,44 @@ def test_requisites_require_ordering_and_errors_1(state, state_tree):
         - require_in:
           - cmd: A
 
-    # will fail with "The following requisites were not found"
+    # will fail with "Referenced state does not exist for requisite"
     F:
       cmd.run:
         - name: echo F
         - require:
           - foobar: A
-    # will fail with "The following requisites were not found"
+    # will fail with "Referenced state does not exist for requisite"
     G:
       cmd.run:
         - name: echo G
         - require:
           - cmd: Z
-    # will fail with "The following requisites were not found"
+    # will fail with "Referenced state does not exist for requisite"
     H:
       cmd.run:
         - name: echo H
         - require:
           - cmd: Z
     """
+    errmsgs = [
+        (
+            "Referenced state does not exist for requisite [require: (foobar: A)]"
+            " in state [echo F] in SLS [requisite]"
+        ),
+        (
+            "Referenced state does not exist for requisite [require: (cmd: Z)]"
+            " in state [echo G] in SLS [requisite]"
+        ),
+        (
+            "Referenced state does not exist for requisite [require: (cmd: Z)]"
+            " in state [echo H] in SLS [requisite]"
+        ),
+    ]
+
     with pytest.helpers.temp_file("requisite.sls", sls_contents, state_tree):
         ret = state.sls("requisite")
-        result = normalize_ret(ret.raw)
-        assert result == expected_result
+        assert ret.failed
+        assert ret.errors == errmsgs
 
 
 def test_requisites_require_ordering_and_errors_2(state, state_tree):
@@ -424,11 +347,13 @@ def test_requisites_require_ordering_and_errors_5(state, state_tree):
         - require:
           - cmd: A
     """
-    # issue #8235
-    # FIXME: Why is require enforcing list syntax while require_in does not?
-    # And why preventing it?
-    # Currently this state fails, should return C/B/A
-    errmsg = 'A recursive requisite was found, SLS "requisite" ID "B" ID "A"'
+    errmsg = (
+        "Recursive requisites were found: "
+        "({'SLS': 'requisite', 'ID': 'B', 'NAME': 'echo B'}, "
+        "'require', {'SLS': 'requisite', 'ID': 'A', 'NAME': 'echo A'}), "
+        "({'SLS': 'requisite', 'ID': 'A', 'NAME': 'echo A'}, 'require', "
+        "{'SLS': 'requisite', 'ID': 'B', 'NAME': 'echo B'})"
+    )
     with pytest.helpers.temp_file("requisite.sls", sls_contents, state_tree):
         ret = state.sls("requisite")
         assert ret.failed
@@ -437,9 +362,9 @@ def test_requisites_require_ordering_and_errors_5(state, state_tree):
 
 def test_requisites_require_any(state, state_tree):
     """
-    Call sls file containing several require_in and require.
+    Call sls file containing require_any.
 
-    Ensure that some of them are failing and that the order is right.
+    Ensure that the order is right.
     """
     sls_contents = """
     # Complex require/require_in graph
@@ -511,9 +436,9 @@ def test_requisites_require_any(state, state_tree):
 
 def test_requisites_require_any_fail(state, state_tree):
     """
-    Call sls file containing several require_in and require.
+    Call sls file containing require_any.
 
-    Ensure that some of them are failing and that the order is right.
+    Ensure that the order is right.
     """
     sls_contents = """
     # D should fail since both E & F fail
@@ -570,7 +495,6 @@ def test_issue_38683_require_order_failhard_combination(state, state_tree):
         assert ret[state_id].comment == "Failure!"
 
 
-@pytest.mark.slow_test
 @pytest.mark.skip_on_windows
 def test_parallel_state_with_requires(state, state_tree):
     """
@@ -609,7 +533,7 @@ def test_parallel_state_with_requires(state, state_tree):
         assert (end_time - start_time) < 30
 
         for item in range(1, 10):
-            _id = "cmd_|-blah-{}_|-sleep 2_|-run".format(item)
+            _id = f"cmd_|-blah-{item}_|-sleep 2_|-run"
             assert "__parallel__" in ret[_id]
 
 

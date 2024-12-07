@@ -5,7 +5,9 @@ import salt.daemons.masterapi as masterapi
 import salt.utils.platform
 from tests.support.mock import MagicMock, patch
 
-pytestmark = [pytest.mark.slow_test]
+pytestmark = [
+    pytest.mark.slow_test,
+]
 
 
 class FakeCache:
@@ -40,7 +42,7 @@ def test_mine_get(funcs, tgt_type_key="tgt_type"):
     funcs.cache.store("minions/webserver", "mine", dict(ip_addr="2001:db8::1:3"))
     with patch(
         "salt.utils.minions.CkMinions._check_compound_minions",
-        MagicMock(return_value=(dict(minions=["webserver"], missing=[]))),
+        MagicMock(return_value=dict(minions=["webserver"], missing=[])),
     ):
         ret = funcs._mine_get(
             {
@@ -79,7 +81,7 @@ def test_mine_get_dict_str(funcs, tgt_type_key="tgt_type"):
     )
     with patch(
         "salt.utils.minions.CkMinions._check_compound_minions",
-        MagicMock(return_value=(dict(minions=["webserver"], missing=[]))),
+        MagicMock(return_value=dict(minions=["webserver"], missing=[])),
     ):
         ret = funcs._mine_get(
             {
@@ -112,7 +114,7 @@ def test_mine_get_dict_list(funcs, tgt_type_key="tgt_type"):
     )
     with patch(
         "salt.utils.minions.CkMinions._check_compound_minions",
-        MagicMock(return_value=(dict(minions=["webserver"], missing=[]))),
+        MagicMock(return_value=dict(minions=["webserver"], missing=[])),
     ):
         ret = funcs._mine_get(
             {

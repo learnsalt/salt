@@ -6,18 +6,18 @@ import logging
 import threading
 
 import pytest
+import tornado.concurrent
+import tornado.gen
+import tornado.ioloop
 from pytestshellutils.utils import ports
+from tornado.testing import AsyncTestCase
 
 import salt.channel.client
 import salt.channel.server
 import salt.config
 import salt.exceptions
-import salt.ext.tornado.concurrent
-import salt.ext.tornado.gen
-import salt.ext.tornado.ioloop
 import salt.utils.platform
 import salt.utils.process
-from salt.ext.tornado.testing import AsyncTestCase
 from tests.support.mixins import AdaptedConfigurationTestCaseMixin
 from tests.unit.transport.mixins import run_loop_in_thread
 
@@ -54,7 +54,7 @@ class AsyncPubServerTest(AsyncTestCase, AdaptedConfigurationTestCaseMixin):
                 "tcp_master_pull_port": tcp_master_pull_port,
                 "tcp_master_publish_pull": tcp_master_publish_pull,
                 "tcp_master_workers": tcp_master_workers,
-            }
+            },
         )
 
         cls.minion_config = cls.get_temp_config(
@@ -64,8 +64,8 @@ class AsyncPubServerTest(AsyncTestCase, AdaptedConfigurationTestCaseMixin):
                 "master_ip": "127.0.0.1",
                 "auth_timeout": 1,
                 "master_port": ret_port,
-                "master_uri": "tcp://127.0.0.1:{}".format(ret_port),
-            }
+                "master_uri": f"tcp://127.0.0.1:{ret_port}",
+            },
         )
 
         cls.process_manager = salt.utils.process.ProcessManager(
@@ -82,7 +82,7 @@ class AsyncPubServerTest(AsyncTestCase, AdaptedConfigurationTestCaseMixin):
             cls.master_config
         )
         cls.req_server_channel.pre_fork(cls.process_manager)
-        cls.io_loop = salt.ext.tornado.ioloop.IOLoop()
+        cls.io_loop = tornado.ioloop.IOLoop()
         cls.stop = threading.Event()
         cls.req_server_channel.post_fork(cls._handle_payload, io_loop=cls.io_loop)
         cls.server_thread = threading.Thread(
@@ -121,7 +121,7 @@ class AsyncPubServerTest(AsyncTestCase, AdaptedConfigurationTestCaseMixin):
             if self._start_handlers.get(k) != v:
                 failures.append((k, v))
         if failures:
-            raise Exception("FDs still attached to the IOLoop: {}".format(failures))
+            raise Exception(f"FDs still attached to the IOLoop: {failures}")
         del self.channel
         del self._start_handlers
 

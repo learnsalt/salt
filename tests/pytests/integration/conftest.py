@@ -55,7 +55,7 @@ def salt_cli(salt_master):
     The ``salt`` CLI as a fixture against the running master
     """
     assert salt_master.is_running()
-    return salt_master.salt_cli()
+    return salt_master.salt_cli(timeout=30)
 
 
 @pytest.fixture(scope="package")
@@ -64,7 +64,7 @@ def salt_call_cli(salt_minion):
     The ``salt-call`` CLI as a fixture against the running minion
     """
     assert salt_minion.is_running()
-    return salt_minion.salt_call_cli()
+    return salt_minion.salt_call_cli(timeout=30)
 
 
 @pytest.fixture(scope="package")
@@ -73,7 +73,7 @@ def salt_cp_cli(salt_master):
     The ``salt-cp`` CLI as a fixture against the running master
     """
     assert salt_master.is_running()
-    return salt_master.salt_cp_cli()
+    return salt_master.salt_cp_cli(timeout=30)
 
 
 @pytest.fixture(scope="package")
@@ -82,7 +82,7 @@ def salt_key_cli(salt_master):
     The ``salt-key`` CLI as a fixture against the running master
     """
     assert salt_master.is_running()
-    return salt_master.salt_key_cli()
+    return salt_master.salt_key_cli(timeout=30)
 
 
 @pytest.fixture(scope="package")
@@ -91,11 +91,11 @@ def salt_run_cli(salt_master):
     The ``salt-run`` CLI as a fixture against the running master
     """
     assert salt_master.is_running()
-    return salt_master.salt_run_cli()
+    return salt_master.salt_run_cli(timeout=30)
 
 
 @pytest.fixture(scope="module")
-def salt_ssh_cli(salt_master, salt_ssh_roster_file, sshd_config_dir):
+def salt_ssh_cli(salt_master, salt_ssh_roster_file, sshd_config_dir, known_hosts_file):
     """
     The ``salt-ssh`` CLI as a fixture against the running master
     """
@@ -105,5 +105,10 @@ def salt_ssh_cli(salt_master, salt_ssh_roster_file, sshd_config_dir):
         roster_file=salt_ssh_roster_file,
         target_host="localhost",
         client_key=str(sshd_config_dir / "client_key"),
-        base_script_args=["--ignore-host-keys"],
     )
+
+
+@pytest.fixture(scope="module")
+def salt_auto_account(salt_auto_account_factory):
+    with salt_auto_account_factory as account:
+        yield account

@@ -20,8 +20,17 @@ build.ps1
 build.ps1 -Version 3005 -PythonVersion 3.8.13
 
 #>
+param(
+    [Parameter(Mandatory=$false)]
+    [Alias("c")]
+    # Don't pretify the output of the Write-Result
+    [Switch] $CICD
+)
 
+#-------------------------------------------------------------------------------
 # Script Preferences
+#-------------------------------------------------------------------------------
+
 $ProgressPreference = "SilentlyContinue"
 $ErrorActionPreference = "Stop"
 
@@ -37,8 +46,12 @@ $RELENV_DIR   = "${env:LOCALAPPDATA}\relenv"
 #-------------------------------------------------------------------------------
 
 function Write-Result($result, $ForegroundColor="Green") {
-    $position = 80 - $result.Length - [System.Console]::CursorLeft
-    Write-Host -ForegroundColor $ForegroundColor ("{0,$position}$result" -f "")
+    if ( $CICD ) {
+        Write-Host $result -ForegroundColor $ForegroundColor
+    } else {
+        $position = 80 - $result.Length - [System.Console]::CursorLeft
+        Write-Host -ForegroundColor $ForegroundColor ("{0,$position}$result" -f "")
+    }
 }
 
 #-------------------------------------------------------------------------------
@@ -124,6 +137,33 @@ if ( Test-Path -Path "$RELENV_DIR" ) {
         exit 1
     } else {
         Write-Result "Success" -ForegroundColor Green
+    }
+}
+
+#-------------------------------------------------------------------------------
+# Remove MSI build files
+#-------------------------------------------------------------------------------
+$files = @(
+    "msi/CustomAction01/CustomAction01.CA.dll",
+    "msi/CustomAction01/CustomAction01.dll",
+    "msi/CustomAction01/CustomAction01.pdb",
+    "msi/Product-discovered-files-config.wixobj",
+    "msi/Product-discovered-files-config.wxs",
+    "msi/Product-discovered-files-x64.wixobj",
+    "msi/Product-discovered-files-x64.wxs",
+    "msi/Product.wixobj"
+)
+$files | ForEach-Object {
+    if ( Test-Path -Path "$SCRIPT_DIR\$_" ) {
+        # Use .net, the powershell function is asynchronous
+        Write-Host "Removing $_`: " -NoNewline
+        [System.IO.File]::Delete("$SCRIPT_DIR\$_")
+        if ( ! (Test-Path -Path "$SCRIPT_DIR\$_") ) {
+            Write-Result "Success" -ForegroundColor Green
+        } else {
+            Write-Result "Failed" -ForegroundColor Red
+            exit 1
+        }
     }
 }
 

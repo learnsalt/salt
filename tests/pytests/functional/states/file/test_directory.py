@@ -113,6 +113,48 @@ def test_directory_max_depth(file, tmp_path):
             assert _mode == _get_oct_mode(untouched_dir)
 
 
+@pytest.mark.skip_on_windows
+def test_directory_children_only(file, tmp_path):
+    """
+    file.directory with children_only=True
+    """
+
+    name = tmp_path / "directory_children_only_dir"
+    name.mkdir(0o0700)
+
+    strayfile = name / "strayfile"
+    strayfile.touch()
+    os.chmod(strayfile, 0o700)
+
+    straydir = name / "straydir"
+    straydir.mkdir(0o0700)
+
+    # none of the children nor parent are currently set to the correct mode
+    ret = file.directory(
+        name=str(name),
+        file_mode="0644",
+        dir_mode="0755",
+        recurse=["mode"],
+        children_only=True,
+    )
+    assert ret.result is True
+
+    # Assert parent directory's mode remains unchanged
+    assert (
+        oct(name.stat().st_mode)[-3:] == "700"
+    ), f"Expected mode 700 for {name}, got {oct(name.stat().st_mode)[-3:]}"
+
+    # Assert child file's mode is changed
+    assert (
+        oct(strayfile.stat().st_mode)[-3:] == "644"
+    ), f"Expected mode 644 for {strayfile}, got {oct(strayfile.stat().st_mode)[-3:]}"
+
+    # Assert child directory's mode is changed
+    assert (
+        oct(straydir.stat().st_mode)[-3:] == "755"
+    ), f"Expected mode 755 for {straydir}, got {oct(straydir.stat().st_mode)[-3:]}"
+
+
 def test_directory_clean(file, tmp_path):
     """
     file.directory with clean=True
@@ -394,3 +436,55 @@ def test_issue_12209_follow_symlinks(
         assert one_group_check == state_file_account.group.name
         two_group_check = modules.file.get_group(str(twodir), follow_symlinks=False)
         assert two_group_check == state_file_account.group.name
+
+
+@pytest.mark.parametrize("backupname_isfile", [False, True])
+def test_directory_backupname_force_test_mode_noclobber(
+    file, tmp_path, backupname_isfile
+):
+    """
+    Ensure that file.directory does not make changes when backupname is used
+    alongside force=True and test=True.
+
+    See https://github.com/saltstack/salt/issues/66049
+    """
+    source_dir = tmp_path / "source_directory"
+    source_dir.mkdir()
+    dest_dir = tmp_path / "dest_directory"
+    backupname = tmp_path / "backup_dir"
+    dest_dir.symlink_to(source_dir.resolve())
+
+    if backupname_isfile:
+        backupname.touch()
+        assert backupname.is_file()
+
+    ret = file.directory(
+        name=str(dest_dir),
+        allow_symlink=False,
+        force=True,
+        backupname=str(backupname),
+        test=True,
+    )
+
+    # Confirm None result
+    assert ret.result is None
+    try:
+        # Confirm dest_dir not modified
+        assert salt.utils.path.readlink(str(dest_dir)) == str(source_dir)
+    except OSError:
+        pytest.fail(f"{dest_dir} was modified")
+
+    # Confirm that comment and changes match what we expect
+    assert (
+        ret.comment
+        == f"{dest_dir} would be backed up and replaced with a new directory"
+    )
+    assert ret.changes[str(dest_dir)] == {"directory": "new"}
+    assert ret.changes["backup"] == f"{dest_dir} would be renamed to {backupname}"
+
+    if backupname_isfile:
+        assert ret.changes["forced"] == (
+            f"Existing file at backup path {backupname} would be removed"
+        )
+    else:
+        assert "forced" not in ret.changes

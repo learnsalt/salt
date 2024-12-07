@@ -339,16 +339,7 @@ def unlock_password(name, root=None):
 def set_password(name, password, use_usermod=False, root=None):
     """
     Set the password for a named user. The password must be a properly defined
-    hash. The password hash can be generated with this command:
-
-    ``python -c "import crypt; print crypt.crypt('password',
-    '\\$6\\$SALTsalt')"``
-
-    ``SALTsalt`` is the 8-character crpytographic salt. Valid characters in the
-    salt are ``.``, ``/``, and any alphanumeric character.
-
-    Keep in mind that the $6 represents a sha512 hash, if your OS is using a
-    different hashing algorithm this needs to be changed accordingly
+    hash. A password hash can be generated with :py:func:`gen_password`.
 
     name
         User to set the password
@@ -377,7 +368,7 @@ def set_password(name, password, use_usermod=False, root=None):
         # ALT Linux uses tcb to store password hashes. More information found
         # in manpage (http://docs.altlinux.org/manpages/tcb.5.html)
         if __grains__["os"] == "ALT":
-            s_file = "/etc/tcb/{}/shadow".format(name)
+            s_file = f"/etc/tcb/{name}/shadow"
         else:
             s_file = "/etc/shadow"
         if root:

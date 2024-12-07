@@ -1,6 +1,7 @@
 """
 Functions which implement running reactor jobs
 """
+
 import fnmatch
 import glob
 import logging
@@ -187,7 +188,16 @@ class Reactor(salt.utils.process.SignalHandlingProcess, salt.state.Compiler):
                         reactors,
                     )
                     return []  # We'll return nothing since there was an error
-                chunks = self.order_chunks(self.compile_high_data(high))
+                chunks, errors = self.compile_high_data(high)
+                if errors:
+                    log.error(
+                        "Unable to render reactions for event %s due to "
+                        "errors (%s) in one or more of the sls files (%s)",
+                        tag,
+                        errors,
+                        reactors,
+                    )
+                    return []  # We'll return nothing since there was an error
         except Exception as exc:  # pylint: disable=broad-except
             log.exception("Exception encountered while compiling reactions")
 
@@ -312,6 +322,7 @@ class ReactWrap:
         Populate the client cache with an instance of the specified type
         """
         reaction_type = low["state"]
+        # pylint: disable=unsupported-membership-test,unsupported-assignment-operation
         if reaction_type not in self.client_cache:
             log.debug("Reactor is populating %s client cache", reaction_type)
             if reaction_type in ("runner", "wheel"):
@@ -333,6 +344,7 @@ class ReactWrap:
                 self.client_cache[reaction_type] = self.reaction_class[reaction_type](
                     self.opts["conf_file"]
                 )
+        # pylint: enable=unsupported-membership-test,unsupported-assignment-operation
 
     def run(self, low):
         """

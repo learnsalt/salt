@@ -46,6 +46,13 @@ ${StrStrAdv}
     !define PYTHON_ARCHITECTURE "x64"
 !endif
 
+# Get Estimated Size from CLI argument /DEstimatedSize
+!ifdef PythonArchitecture
+    !define ESTIMATED_SIZE "${EstimatedSize}"
+!else
+    # Default
+    !define ESTIMATED_SIZE 0
+!endif
 
 # x64 and AMD64 are AMD64, all others are x86
 !if "${PYTHON_ARCHITECTURE}" == "x64"
@@ -277,7 +284,7 @@ Function pageMinionConfig
             `hostname` no changes will be made."
     ${Else}
         ${NSD_CreateLabel} 0 75u 100% 60u \
-            "Clicking `Install` will backup the the existing minion config \
+            "Clicking `Install` will backup the existing minion config \
             file and minion.d directories. The values above will be used in \
             the custom config.$\n\
             $\n\
@@ -526,124 +533,50 @@ Section -copy_prereqs
     File /r "..\..\prereqs\"
 SectionEnd
 
-# Check if the Windows 10 Universal C Runtime (KB2999226) is installed. Python
-# 3 needs the updated ucrt on Windows 8.1/2012R2 and lower. They are installed
-# via KB2999226, but we're not going to patch the system here. Instead, we're
-# going to copy the .dll files to the \salt\bin directory
-Section -install_ucrt
 
-    Var /GLOBAL UcrtFileName
-
-    # Get the Major.Minor version Number
-    # Windows 10 introduced CurrentMajorVersionNumber
-    ReadRegStr $R0 HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion" \
-        CurrentMajorVersionNumber
-
-    # Windows 10/2016 will return a value here, skip to the end if returned
-    StrCmp $R0 '' lbl_needs_ucrt 0
-
-    # Found Windows 10
-    detailPrint "KB2999226 does not apply to this machine"
-    goto lbl_done
-
-    lbl_needs_ucrt:
-    # UCRT only needed on Windows Server 2012R2/Windows 8.1 and below. The
-    # first ReadRegStr command above should have skipped to lbl_done if on
-    # Windows 10 box
-
-    # Is the update already installed
-    ClearErrors
-
-    # Use WMI to check if it's installed
-    detailPrint "Checking for existing UCRT (KB2999226) installation"
-    nsExec::ExecToStack 'cmd /q /c wmic qfe get hotfixid | findstr "^KB2999226"'
-    # Clean up the stack
-    Pop $R0 # Gets the ErrorCode
-    Pop $R1 # Gets the stdout, which should be KB2999226 if it's installed
-
-    # If it returned KB2999226 it's already installed
-    StrCmp $R1 'KB2999226' lbl_done
-
-    detailPrint "UCRT (KB2999226) not found"
-
-    # Use RunningX64 here to get the Architecture for the system running the
-    # installer.
-    ${If} ${RunningX64}
-        StrCpy $UcrtFileName "ucrt_x64.zip"
-    ${Else}
-        StrCpy $UcrtFileName "ucrt_x86.zip"
-    ${EndIf}
-
-    ClearErrors
-
-    detailPrint "Unzipping UCRT dll files to $INSTDIR\Scripts"
-    CreateDirectory $INSTDIR\Scripts
-    nsisunz::UnzipToLog "$PLUGINSDIR\$UcrtFileName" "$INSTDIR\Scripts"
-
-    # Clean up the stack
-    Pop $R0  # Get Error
-
-    ${IfNot} $R0 == "success"
-        detailPrint "error: $R0"
-        Sleep 3000
-    ${Else}
-        detailPrint "UCRT dll files copied successfully"
-    ${EndIf}
-
-    lbl_done:
-
-SectionEnd
-
-
-# Check and install Visual C++ redist 2013 packages
+# Check and install Visual C++ redist 2022 packages
 # Hidden section (-) to install VCRedist
-Section -install_vcredist_2013
+Section -install_vcredist_2022
 
     Var /GLOBAL VcRedistName
-    Var /GLOBAL VcRedistGuid
-    Var /GLOBAL NeedVcRedist
-
-    # GUIDs can be found by installing them and then running the following
-    # command:
-    # wmic product where "Name like '%2013%minimum runtime%'" get Name, Version, IdentifyingNumber
-    !define VCREDIST_X86_NAME "vcredist_x86_2013"
-    !define VCREDIST_X86_GUID "{8122DAB1-ED4D-3676-BB0A-CA368196543E}"
-    !define VCREDIST_X64_NAME "vcredist_x64_2013"
-    !define VCREDIST_X64_GUID "{53CF6934-A98D-3D84-9146-FC4EDF3D5641}"
+    Var /GLOBAL VcRedistReg
 
     # Only install 64bit VCRedist on 64bit machines
     # Use RunningX64 here to get the Architecture for the system running the
     # installer.
     ${If} ${RunningX64}
-        StrCpy $VcRedistName ${VCREDIST_X64_NAME}
-        StrCpy $VcRedistGuid ${VCREDIST_X64_GUID}
+        StrCpy $VcRedistName "vcredist_x64_2022"
+        StrCpy $VcRedistReg "SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\x64"
     ${Else}
-        StrCpy $VcRedistName ${VCREDIST_X86_NAME}
-        StrCpy $VcRedistGuid ${VCREDIST_X86_GUID}
+        StrCpy $VcRedistName "vcredist_x86_2022"
+        StrCpy $VcRedistReg "SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x86"
     ${EndIf}
 
     # Detecting VCRedist Installation
-    !define INSTALLSTATE_DEFAULT "5"
-
-    StrCpy $NeedVcRedist "False"
     detailPrint "Checking for $VcRedistName..."
-    System::Call "msi::MsiQueryProductStateA(t '$VcRedistGuid') i.r0"
-    StrCmp $0 ${INSTALLSTATE_DEFAULT} +2 0
-    StrCpy $NeedVcRedist "True"
-
+    ReadRegDword $0 HKLM $VcRedistReg "Installed"
+    StrCmp $0 "1" +2 0
     Call InstallVCRedist
 
 SectionEnd
 
 
 Function InstallVCRedist
-    # Check to see if it's already installed
-    ${If} $NeedVcRedist == "True"
-        detailPrint "System requires $VcRedistName"
-        MessageBox MB_ICONQUESTION|MB_YESNO|MB_DEFBUTTON2 \
-            "$VcRedistName is currently not installed. Would you like to \
-            install?" \
-            /SD IDYES IDNO endVCRedist
+    detailPrint "System requires $VcRedistName"
+    MessageBox MB_ICONQUESTION|MB_YESNO|MB_DEFBUTTON2 \
+        "$VcRedistName is currently not installed. Would you like to \
+        install?" \
+        /SD IDYES IDYES InstallVcRedist
+
+    detailPrint "$VcRedistName not installed"
+    detailPrint ">>>Installation aborted by user<<<"
+    MessageBox MB_ICONEXCLAMATION \
+        "$VcRedistName not installed. Aborted by user.$\n$\n\
+        Installer will now close." \
+        /SD IDOK
+    Quit
+
+    InstallVcRedist:
 
         # If an output variable is specified ($0 in the case below), ExecWait
         # sets the variable with the exit code (and only sets the error flag if
@@ -659,12 +592,15 @@ Function InstallVCRedist
         detailPrint "An error occurred during installation of $VcRedistName"
         MessageBox MB_OK|MB_ICONEXCLAMATION \
             "$VcRedistName failed to install. Try installing the package \
-            manually." \
+            manually.$\n$\n\
+            The installer will now close." \
             /SD IDOK
+            Quit
 
         CheckVcRedistErrorCode:
         # Check for Reboot Error Code (3010)
         ${If} $0 == 3010
+            detailPrint "$VcRedistName installed but requires a restart to complete."
             detailPrint "Reboot and run Salt install again"
             MessageBox MB_OK|MB_ICONINFORMATION \
                 "$VcRedistName installed but requires a restart to complete." \
@@ -675,14 +611,12 @@ Function InstallVCRedist
             detailPrint "An error occurred during installation of $VcRedistName"
             detailPrint "Error: $0"
             MessageBox MB_OK|MB_ICONEXCLAMATION \
-                "$VcRedistName failed with ErrorCode: $0. Try installing the \
-                package manually." \
+                "$VcRedistName failed to install. Try installing the package \
+                mnually.$\n\
+                ErrorCode: $0$\n\
+                The installer will now close." \
                 /SD IDOK
         ${EndIf}
-
-        endVCRedist:
-
-    ${EndIf}
 
 FunctionEnd
 
@@ -933,8 +867,12 @@ Section -Post
     WriteRegStr HKLM "SYSTEM\CurrentControlSet\services\salt-minion" \
         "DependOnService" "nsi"
 
-    # Set the estimated size
-    ${GetSize} "$INSTDIR" "/S=OK" $0 $1 $2
+    # If ESTIMATED_SIZE is not set, calculated it
+    ${If} ${ESTIMATED_SIZE} == 0
+        ${GetSize} "$INSTDIR" "/S=OK" $0 $1 $2
+    ${Else}
+        StrCpy $0 ${ESTIMATED_SIZE}
+    ${Endif}
     IntFmt $0 "0x%08X" $0
     WriteRegDWORD ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" \
         "EstimatedSize" "$0"
@@ -1103,9 +1041,10 @@ Function ${un}uninstallSalt
         ${EndIf}
 
     # Remove files
-    Delete "$INSTDIR\uninst.exe"
-    Delete "$INSTDIR\ssm.exe"
+    Delete "$INSTDIR\multi-minion*"
     Delete "$INSTDIR\salt*"
+    Delete "$INSTDIR\ssm.exe"
+    Delete "$INSTDIR\uninst.exe"
     Delete "$INSTDIR\vcredist.exe"
     RMDir /r "$INSTDIR\DLLs"
     RMDir /r "$INSTDIR\Include"
@@ -1183,6 +1122,20 @@ Function ${un}uninstallSalt
 
     ${Else}
 
+        # Prompt for the removal of the Installation Directory which contains
+        # the extras directory and the Root Directory which contains the config
+        # and pki directories. These directories will not be removed during
+        # an upgrade.
+        ${IfNot} $DeleteRootDir == 1
+            MessageBox MB_YESNO|MB_DEFBUTTON2|MB_USERICON \
+                "Would you like to completely remove the entire Salt \
+                Installation? This includes the following:$\n\
+                - Extra Pip Packages ($INSTDIR\extras-3.##)$\n\
+                - Minion Config ($RootDir\conf)$\n\
+                - Minion PKIs ($RootDir\conf\pki)"\
+                /SD IDNO IDNO finished
+        ${EndIf}
+
         # New Method Installation
         # This makes the $APPDATA variable point to the ProgramData folder instead
         # of the current user's roaming AppData folder
@@ -1208,8 +1161,8 @@ Function ${un}uninstallSalt
         # Only delete Salt Project directory if it's in Program Files
         # Otherwise, we can't guess where the user may have installed salt
         ${GetParent} $INSTDIR $0  # Get parent directory (Salt Project)
-        ${If} $0 == "$ProgramFiles\Salt Project" # Make sure it's not ProgramFiles
-        ${OrIf} $0 == "$ProgramFiles64\Salt Project" # Make sure it's not Program Files (x86)
+        ${If} $0 == "$ProgramFiles\Salt Project" # Make sure it's ProgramFiles
+        ${OrIf} $0 == "$ProgramFiles64\Salt Project" # Make sure it's Program Files (x86)
             SetOutPath "$SysDrive"  # Can't remove CWD
             RMDir /r $0
         ${EndIf}
@@ -1221,15 +1174,6 @@ Function ${un}uninstallSalt
 
         # Expand any environment variables
         ExpandEnvStrings $RootDir $RootDir
-
-        # Prompt for the removal of the Root Directory which contains the config
-        # and pki directories
-        ${IfNot} $DeleteRootDir == 1
-            MessageBox MB_YESNO|MB_DEFBUTTON2|MB_USERICON \
-                "Would you like to completely remove the Root Directory \
-                ($RootDir) and all of its contents?" \
-                /SD IDNO IDNO finished
-        ${EndIf}
 
         # Remove the Salt Project directory in ProgramData
         # The Salt Project directory will only ever be in ProgramData
@@ -1831,8 +1775,8 @@ Function un.parseUninstallerCommandLineSwitches
         $\n$\t$\tare the same (C:\salt)\
         $\n\
         $\n/delete-root-dir$\tDelete the root directory that contains the config\
-        $\n$\t$\tand pki directories. Default is to not delete the root\
-        $\n$\t$\tdirectory\
+        $\n$\t$\tand pki directories. Also removes the installation directory\
+        $\n$\t$\tincluding the extras directory. Default is to not delete\
         $\n\
         $\n$\t$\tThis applies to new method installations where the\
         $\n$\t$\troot directory is in ProgramData and the installation\

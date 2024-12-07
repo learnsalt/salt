@@ -2,7 +2,7 @@
 This module contains the function calls to execute command line scripts
 """
 
-
+import contextlib
 import functools
 import logging
 import os
@@ -18,9 +18,6 @@ import salt.defaults.exitcodes
 from salt.exceptions import SaltClientError, SaltReqTimeoutError, SaltSystemExit
 
 log = logging.getLogger(__name__)
-
-if sys.version_info < (3,):
-    raise SystemExit(salt.defaults.exitcodes.EX_GENERIC)
 
 
 def _handle_signals(client, signum, sigframe):
@@ -415,7 +412,7 @@ def salt_key():
         _install_signal_handlers(client)
         client.run()
     except Exception as err:  # pylint: disable=broad-except
-        sys.stderr.write("Error: {}\n".format(err))
+        sys.stderr.write(f"Error: {err}\n")
 
 
 def salt_cp():
@@ -484,16 +481,14 @@ def salt_cloud():
     """
     The main function for salt-cloud
     """
-    # Define 'salt' global so we may use it after ImportError. Otherwise,
-    # UnboundLocalError will be raised.
-    global salt  # pylint: disable=W0602
-
     try:
         # Late-imports for CLI performance
         import salt.cloud
         import salt.cloud.cli
     except ImportError as e:
         # No salt cloud on Windows
+        import salt.defaults.exitcodes
+
         log.error("Error importing salt cloud: %s", e)
         print("salt-cloud is not available in this system")
         sys.exit(salt.defaults.exitcodes.EX_UNAVAILABLE)
@@ -573,7 +568,7 @@ def salt_unity():
     if len(sys.argv) < 2:
         msg = "Must pass in a salt command, available commands are:"
         for cmd in avail:
-            msg += "\n{}".format(cmd)
+            msg += f"\n{cmd}"
         print(msg)
         sys.exit(1)
     cmd = sys.argv[1]
@@ -582,20 +577,60 @@ def salt_unity():
         sys.argv[0] = "salt"
         s_fun = salt_main
     else:
-        sys.argv[0] = "salt-{}".format(cmd)
+        sys.argv[0] = f"salt-{cmd}"
         sys.argv.pop(1)
-        s_fun = getattr(sys.modules[__name__], "salt_{}".format(cmd))
+        s_fun = getattr(sys.modules[__name__], f"salt_{cmd}")
     s_fun()
+
+
+def _pip_args(args, target):
+    new_args = args[:]
+    target_in_args = False
+    for arg in args:
+        if "--target" in arg:
+            target_in_args = True
+    if "install" in args and not target_in_args:
+        new_args.append(f"--target={target}")
+    return new_args
+
+
+def _pip_environment(env, extras):
+    new_env = env.copy()
+    if "PYTHONPATH" in env:
+        new_env["PYTHONPATH"] = f"{extras}{os.pathsep}{env['PYTHONPATH']}"
+    else:
+        new_env["PYTHONPATH"] = extras
+    return new_env
+
+
+def _get_onedir_env_path():
+    # This function only exists to simplify testing.
+    with contextlib.suppress(AttributeError):
+        return sys.RELENV
+    return None
 
 
 def salt_pip():
     """
     Proxy to current python's pip
     """
+    relenv_path = _get_onedir_env_path()
+    if relenv_path is None:
+        print(
+            "'salt-pip' is only meant to be used from a Salt onedir. You probably "
+            "want to use the system 'pip` binary.",
+            file=sys.stderr,
+            flush=True,
+        )
+        sys.exit(salt.defaults.exitcodes.EX_GENERIC)
+    else:
+        extras = str(relenv_path / "extras-{}.{}".format(*sys.version_info))
+    env = _pip_environment(os.environ.copy(), extras)
+    args = _pip_args(sys.argv[1:], extras)
     command = [
         sys.executable,
         "-m",
         "pip",
-    ] + sys.argv[1:]
-    ret = subprocess.run(command, shell=False, check=False)
+    ] + _pip_args(sys.argv[1:], extras)
+    ret = subprocess.run(command, shell=False, check=False, env=env)
     sys.exit(ret.returncode)
